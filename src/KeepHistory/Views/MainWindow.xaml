@@ -1,0 +1,97 @@
+<Window x:Class="KeepHistory.Views.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="KeepHistory - 最近使ったファイル"
+        Width="960" Height="600" MinWidth="520" MinHeight="300"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource WindowBackgroundBrush}"
+        FocusManager.FocusedElement="{Binding ElementName=SearchBox}"
+        PreviewKeyDown="OnWindowPreviewKeyDown">
+
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- 検索と絞り込み（タブは使わない） -->
+        <DockPanel Grid.Row="0" Margin="0,0,0,10" LastChildFill="True">
+            <Button x:Name="SettingsButton" DockPanel.Dock="Right" Content="⚙ 設定"
+                    Style="{StaticResource ToolbarButtonStyle}" Click="OnSettingsClick" />
+            <ToggleButton x:Name="KeptOnlyToggle" DockPanel.Dock="Right" Content="★ キープのみ"
+                          IsChecked="{Binding KeptOnly}" Style="{StaticResource ToolbarButtonStyle}" />
+            <ComboBox x:Name="PeriodBox" DockPanel.Dock="Right" Width="120"
+                      ItemsSource="{Binding PeriodChoices}" SelectedItem="{Binding SelectedPeriod}"
+                      DisplayMemberPath="Label" Style="{StaticResource ToolbarComboStyle}" />
+            <ComboBox x:Name="ExtensionBox" DockPanel.Dock="Right" Width="130"
+                      ItemsSource="{Binding ExtensionChoices}" SelectedItem="{Binding SelectedExtension}"
+                      DisplayMemberPath="Label" Style="{StaticResource ToolbarComboStyle}" />
+            <Grid>
+                <TextBox x:Name="SearchBox" Style="{StaticResource SearchBoxStyle}"
+                         Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                         PreviewKeyDown="OnSearchBoxPreviewKeyDown" />
+                <TextBlock Text="ファイル名・パスで検索（スペース区切りで AND）">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock" BasedOn="{StaticResource PlaceholderTextStyle}">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding Text.Length, ElementName=SearchBox}" Value="0">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+            </Grid>
+        </DockPanel>
+
+        <!-- 一覧。並び替えは列見出しのクリックのみ -->
+        <DataGrid x:Name="HistoryGrid" Grid.Row="1"
+                  Style="{StaticResource HistoryGridStyle}"
+                  RowStyle="{StaticResource HistoryRowStyle}"
+                  ItemsSource="{Binding View}"
+                  AutoGenerateColumns="False" IsReadOnly="True"
+                  SelectionMode="Extended" SelectionUnit="FullRow"
+                  CanUserSortColumns="True" CanUserReorderColumns="True" CanUserResizeColumns="True"
+                  EnableRowVirtualization="True"
+                  MouseDoubleClick="OnGridMouseDoubleClick"
+                  PreviewKeyDown="OnGridPreviewKeyDown">
+            <DataGrid.ContextMenu>
+                <ContextMenu>
+                    <MenuItem Header="開く" InputGestureText="Enter" FontWeight="Bold" Click="OnOpenClick" />
+                    <MenuItem Header="フォルダを開く" Click="OnOpenFolderClick" />
+                    <MenuItem Header="パスをコピー" InputGestureText="Ctrl+C" Click="OnCopyPathClick" />
+                    <Separator />
+                    <MenuItem Header="★ キープの切り替え" InputGestureText="Ctrl+K" Click="OnToggleKeepClick" />
+                    <Separator />
+                    <MenuItem Header="履歴から削除" InputGestureText="Delete" Click="OnDeleteClick" />
+                </ContextMenu>
+            </DataGrid.ContextMenu>
+            <DataGrid.Columns>
+                <DataGridTemplateColumn Header="★" SortMemberPath="IsKept" Width="40" CanUserResize="False"
+                                        HeaderStyle="{StaticResource KeepColumnHeaderStyle}">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <Button Style="{StaticResource KeepStarButtonStyle}" Click="OnKeepButtonClick" />
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="ファイル名" Binding="{Binding FileName}" SortMemberPath="FileName"
+                                    Width="260" ElementStyle="{StaticResource CellTextStyle}" />
+                <DataGridTextColumn Header="種類" Binding="{Binding Extension}" SortMemberPath="Extension"
+                                    Width="70" ElementStyle="{StaticResource CellTextStyle}" />
+                <DataGridTextColumn Header="フォルダ" Binding="{Binding FolderPath}" SortMemberPath="FolderPath"
+                                    Width="380" ElementStyle="{StaticResource CellTextStyle}" />
+                <DataGridTextColumn Header="前回利用日時" Binding="{Binding LastUsedText}" SortMemberPath="LastUsed"
+                                    Width="140" ElementStyle="{StaticResource CellTextStyle}" />
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <DockPanel Grid.Row="2" Margin="0,8,0,0">
+            <TextBlock DockPanel.Dock="Right" Style="{StaticResource SubTextStyle}"
+                       Text="Enter: 開く　Ctrl+K: キープ　Delete: 履歴から削除　Esc: 閉じる" />
+            <TextBlock x:Name="StatusText" Style="{StaticResource SubTextStyle}" Text="{Binding StatusText}" />
+        </DockPanel>
+    </Grid>
+</Window>

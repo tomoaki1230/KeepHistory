@@ -1,0 +1,50 @@
+<Window x:Class="KeepHistory.Views.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="KeepHistory の設定"
+        Width="500" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{StaticResource WindowBackgroundBrush}"
+        FocusManager.FocusedElement="{Binding ElementName=RetentionDaysBox}">
+    <StackPanel Margin="18,6,18,16">
+
+        <TextBlock Text="保持期間" Style="{StaticResource SectionHeaderStyle}" />
+        <StackPanel Orientation="Horizontal">
+            <TextBox x:Name="RetentionDaysBox" Width="80" Height="26" VerticalContentAlignment="Center"
+                     HorizontalContentAlignment="Right" />
+            <TextBlock Text="日" VerticalAlignment="Center" Margin="6,0,0,0" Style="{StaticResource BaseTextStyle}" />
+        </StackPanel>
+        <TextBlock Style="{StaticResource SubTextStyle}" Margin="0,4,0,0"
+                   Text="この日数より前に使った履歴は消します。★キープした履歴は期限を過ぎても残します。" />
+
+        <TextBlock Text="記録しないファイル（除外パターン）" Style="{StaticResource SectionHeaderStyle}" />
+        <TextBox x:Name="ExcludePatternsBox" Height="130" AcceptsReturn="True" TextWrapping="NoWrap"
+                 VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                 FontFamily="Consolas, MS Gothic" />
+        <TextBlock Style="{StaticResource SubTextStyle}" Margin="0,4,0,0"
+                   Text="1 行に 1 つ。* と ? が使えます。\ を含むパターンはフルパスと、含まないパターンはファイル名と照合します。# で始まる行はコメントです。" />
+
+        <TextBlock Text="ホットキー（履歴画面の呼び出し）" Style="{StaticResource SectionHeaderStyle}" />
+        <CheckBox x:Name="HotkeyEnabledBox" Content="ホットキーを使う" Margin="0,0,0,6" />
+        <StackPanel Orientation="Horizontal"
+                    IsEnabled="{Binding IsChecked, ElementName=HotkeyEnabledBox}">
+            <CheckBox x:Name="CtrlBox" Content="Ctrl" VerticalAlignment="Center" Margin="0,0,12,0" />
+            <CheckBox x:Name="AltBox" Content="Alt" VerticalAlignment="Center" Margin="0,0,12,0" />
+            <CheckBox x:Name="ShiftBox" Content="Shift" VerticalAlignment="Center" Margin="0,0,12,0" />
+            <CheckBox x:Name="WinBox" Content="Win" VerticalAlignment="Center" Margin="0,0,12,0" />
+            <TextBlock Text="+" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource BaseTextStyle}" />
+            <ComboBox x:Name="KeyBox" Width="80" Height="26" />
+        </StackPanel>
+        <TextBlock Style="{StaticResource SubTextStyle}" Margin="0,4,0,0"
+                   Text="設定画面を開いている間はホットキーを解除しています。" />
+
+        <TextBlock x:Name="ErrorText" Foreground="{StaticResource ErrorBrush}" Margin="0,12,0,0"
+                   TextWrapping="Wrap" Visibility="Collapsed" />
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+            <Button x:Name="OkButton" Content="OK" IsDefault="True" Style="{StaticResource DialogButtonStyle}"
+                    Click="OnOkClick" />
+            <Button Content="キャンセル" IsCancel="True" Style="{StaticResource DialogButtonStyle}" />
+        </StackPanel>
+    </StackPanel>
+</Window>

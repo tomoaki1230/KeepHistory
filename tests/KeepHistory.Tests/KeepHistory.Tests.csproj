@@ -1,0 +1,44 @@
+<!--
+  NuGet 参照ゼロの自作テスト基盤。
+  テストはコンソール実行ファイルとしてビルドし、`dotnet test` から呼ばれる VSTest ターゲットを
+  下で上書きして、この実行ファイルを起動する。
+  （VSTest ターゲットを SDK の定義より後に置くため、Sdk を明示的に Import している）
+-->
+<Project>
+
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>KeepHistory.Tests</RootNamespace>
+    <AssemblyName>KeepHistory.Tests</AssemblyName>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <IsTestProject>true</IsTestProject>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\KeepHistory\KeepHistory.csproj" />
+  </ItemGroup>
+
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+
+  <!-- dotnet test から呼ばれる。自作ランナーを実行し、終了コードで成否を返す -->
+  <Target Name="VSTest" DependsOnTargets="Build">
+    <Exec Command="&quot;$(TargetDir)$(TargetName).exe&quot; $(KeepHistoryTestFilter)"
+          WorkingDirectory="$(TargetDir)"
+          StandardOutputImportance="high"
+          StandardErrorImportance="high"
+          StdOutEncoding="utf-8"
+          StdErrEncoding="utf-8"
+          IgnoreStandardErrorWarningFormat="true"
+          CustomErrorRegularExpression="^\[失敗\]" />
+  </Target>
+
+</Project>
