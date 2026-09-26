@@ -30,6 +30,15 @@ public sealed class HistoryEntry : INotifyPropertyChanged
 
     public string FolderPath => System.IO.Path.GetDirectoryName(Path) ?? string.Empty;
 
+    private string? _normalizedPath;
+    private string? _normalizedFileName;
+
+    /// <summary>検索用に正規化したパス（TextNormalizer。Path は変わらないので一度だけ作る）。</summary>
+    public string NormalizedPath => _normalizedPath ??= TextNormalizer.Normalize(Path);
+
+    /// <summary>検索用に正規化したファイル名。</summary>
+    public string NormalizedFileName => _normalizedFileName ??= TextNormalizer.Normalize(FileName);
+
     /// <summary>小文字・ドット付きの拡張子。拡張子が無ければ空文字。</summary>
     public string Extension => PathText.ExtensionOf(Path);
 

@@ -5,6 +5,8 @@
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
+                <!-- 色（ThemeManager がライト／ダークを入れ替える）。スタイルより先に読む -->
+                <ResourceDictionary Source="Themes/Colors.Light.xaml" />
                 <ResourceDictionary Source="Themes/Shared.xaml" />
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>

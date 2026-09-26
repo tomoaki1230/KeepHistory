@@ -2,77 +2,121 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="KeepHistory の設定"
-        Width="500" SizeToContent="Height" ResizeMode="NoResize"
+        Width="520" Height="560" ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
-        Background="{StaticResource WindowBackgroundBrush}"
+        Background="{DynamicResource WindowBackgroundBrush}"
+        Foreground="{DynamicResource TextBrush}"
         FocusManager.FocusedElement="{Binding ElementName=StayResidentBox}">
-    <StackPanel Margin="18,6,18,16">
+    <!-- 設定はタブに分ける（全般／履歴／ホットキー）。エラーとボタンはタブの外（どのタブでも見える） -->
+    <DockPanel Margin="14,12,14,14">
+        <StackPanel DockPanel.Dock="Bottom">
+            <TextBlock x:Name="ErrorText" Foreground="{DynamicResource ErrorBrush}" Margin="2,10,0,0"
+                       TextWrapping="Wrap" Visibility="Collapsed" />
 
-        <TextBlock Text="起動のしかた" Style="{StaticResource SectionHeaderStyle}" />
-        <CheckBox x:Name="StayResidentBox" Content="通知領域に常駐する" />
-        <TextBlock Style="{StaticResource SubTextStyle}" Margin="0,4,0,0"
-                   Text="常駐すると、画面を閉じても終了せず通知領域に残ります。常駐しない場合は、画面を閉じるとアプリを終了します。" />
-        <TextBlock x:Name="ResidentCountNote" Style="{StaticResource SubTextStyle}" Margin="0,4,0,0"
-                   Text="オフの場合、KeepHistory を起動していない間に開いたファイルは回数に数えられないため、「回数」が正確に取得できません。" />
-
-        <TextBlock Text="保持期間" Style="{StaticResource SectionHeaderStyle}" />
-        <ComboBox x:Name="RetentionBox" Width="120" Height="26" HorizontalAlignment="Left"
-                  DisplayMemberPath="Label" />
-        <TextBlock Style="{StaticResource SubTextStyle}" Margin="0,4,0,0"
-                   Text="この期間より前に使った履歴は消します。★キープした履歴は期限を過ぎても残します。" />
-
-        <DockPanel>
-            <Button x:Name="ResetExcludePatternsButton" DockPanel.Dock="Right" Content="既定に戻す"
-                    VerticalAlignment="Bottom" Margin="0,0,0,6" Height="24" Padding="10,0"
-                    Style="{StaticResource ToolbarButtonStyle}" Click="OnResetExcludePatternsClick" />
-            <TextBlock Text="記録しないファイル（除外パターン）" Style="{StaticResource SectionHeaderStyle}" />
-        </DockPanel>
-        <TextBox x:Name="ExcludePatternsBox" Height="130" AcceptsReturn="True" TextWrapping="NoWrap"
-                 VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
-                 FontFamily="Consolas, MS Gothic" />
-        <TextBlock Style="{StaticResource SubTextStyle}" Margin="0,4,0,0"
-                   Text="1 行に 1 つ。* と ? が使えます。\ を含むパターンはフルパスと、含まないパターンはファイル名と照合します。# で始まる行はコメントです。" />
-
-        <TextBlock Text="ホットキー（履歴画面の呼び出し）" Style="{StaticResource SectionHeaderStyle}" />
-        <CheckBox x:Name="HotkeyEnabledBox" Content="ホットキーを使う" Margin="0,0,0,6"
-                  Checked="OnHotkeyInputChanged" Unchecked="OnHotkeyInputChanged" />
-        <StackPanel Orientation="Horizontal"
-                    IsEnabled="{Binding IsChecked, ElementName=HotkeyEnabledBox}">
-            <CheckBox x:Name="CtrlBox" Content="Ctrl" VerticalAlignment="Center" Margin="0,0,12,0"
-                      Checked="OnHotkeyInputChanged" Unchecked="OnHotkeyInputChanged" />
-            <CheckBox x:Name="AltBox" Content="Alt" VerticalAlignment="Center" Margin="0,0,12,0"
-                      Checked="OnHotkeyInputChanged" Unchecked="OnHotkeyInputChanged" />
-            <CheckBox x:Name="ShiftBox" Content="Shift" VerticalAlignment="Center" Margin="0,0,12,0"
-                      Checked="OnHotkeyInputChanged" Unchecked="OnHotkeyInputChanged" />
-            <CheckBox x:Name="WinBox" Content="Win" VerticalAlignment="Center" Margin="0,0,12,0"
-                      Checked="OnHotkeyInputChanged" Unchecked="OnHotkeyInputChanged" />
-            <TextBlock Text="+" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource BaseTextStyle}" />
-            <ComboBox x:Name="KeyBox" Width="80" Height="26" SelectionChanged="OnHotkeyInputChanged" />
+            <DockPanel Margin="0,12,0,0">
+                <Button x:Name="ResetAllButton" DockPanel.Dock="Left" Content="すべて初期状態に戻す" Margin="0"
+                        Style="{StaticResource DialogButtonStyle}" Click="OnResetAllClick" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="OkButton" Content="OK" IsDefault="True" Style="{StaticResource DialogButtonStyle}"
+                            Click="OnOkClick" />
+                    <Button Content="キャンセル" IsCancel="True" Style="{StaticResource DialogButtonStyle}" />
+                </StackPanel>
+            </DockPanel>
         </StackPanel>
-        <!-- 選んだ組み合わせが使えるかを、変更のたびにその場で表示する -->
-        <TextBlock x:Name="HotkeyStatusText" Margin="0,6,0,0" TextWrapping="Wrap" Visibility="Collapsed" />
-        <TextBlock Style="{StaticResource SubTextStyle}" Margin="0,4,0,0"
-                   Text="設定画面を開いている間はホットキーを解除しています。" />
+        <TabControl x:Name="SettingsTabs" SelectedIndex="0">
+            <TabItem x:Name="GeneralTab" Header="全般">
+                <ScrollViewer x:Name="GeneralTabScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="16,2,16,12">
+                    <TextBlock Text="起動のしかた" Style="{StaticResource SectionHeaderStyle}" />
+                    <CheckBox x:Name="StayResidentBox" Content="通知領域に常駐する" />
+                    <TextBlock Style="{StaticResource SubTextStyle}" Margin="0,4,0,0"
+                               Text="常駐すると、画面を閉じても終了せず通知領域に残ります。常駐しない場合は、画面を閉じるとアプリを終了します。" />
+                    <TextBlock x:Name="ResidentCountNote" Style="{StaticResource SubTextStyle}" Margin="0,4,0,0"
+                               Text="オフの場合、KeepHistory を起動していない間に開いたファイルは回数に数えられないため、「回数」が正確に取得できません。" />
+                    <CheckBox x:Name="StartWithWindowsBox" Content="Windows の起動時に KeepHistory を起動する" Margin="0,8,0,0" />
+                    <TextBlock Style="{StaticResource SubTextStyle}" Margin="0,4,0,0"
+                               Text="常駐する設定と組み合わせると、サインイン直後からホットキーで呼び出せます（画面は出さずに通知領域で待機します）。" />
 
-        <TextBlock Text="削除した履歴" Style="{StaticResource SectionHeaderStyle}" />
-        <StackPanel Orientation="Horizontal">
-            <Button x:Name="DeletedHistoryButton" Content="削除した履歴を元に戻す..." Height="26" Padding="12,0"
-                    Margin="0" Style="{StaticResource ToolbarButtonStyle}" Click="OnDeletedHistoryClick" />
-        </StackPanel>
-        <TextBlock Style="{StaticResource SubTextStyle}" Margin="0,4,0,0"
-                   Text="履歴から削除したファイルを選んで、一覧に戻せます（すぐに反映されます）。" />
+                    <TextBlock Text="画面" Style="{StaticResource SectionHeaderStyle}" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <TextBlock Text="表示する位置" VerticalAlignment="Center" Margin="0,0,12,0" Style="{StaticResource BaseTextStyle}" />
+                        <ComboBox x:Name="PlacementBox" AutomationProperties.Name="表示する位置" Grid.Column="1" Width="200" Height="26" HorizontalAlignment="Left"
+                                  DisplayMemberPath="Label" />
+                        <TextBlock Grid.Row="1" Text="色" VerticalAlignment="Center" Margin="0,6,12,0" Style="{StaticResource BaseTextStyle}" />
+                        <ComboBox x:Name="ThemeBox" AutomationProperties.Name="色" Grid.Row="1" Grid.Column="1" Width="200" Height="26" HorizontalAlignment="Left"
+                                  Margin="0,6,0,0" DisplayMemberPath="Label" />
+                    </Grid>
 
-        <TextBlock x:Name="ErrorText" Foreground="{StaticResource ErrorBrush}" Margin="0,12,0,0"
-                   TextWrapping="Wrap" Visibility="Collapsed" />
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+            <TabItem x:Name="HistoryTab" Header="履歴">
+                <ScrollViewer x:Name="HistoryTabScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="16,2,16,12">
+                    <TextBlock Text="保持期間" Style="{StaticResource SectionHeaderStyle}" />
+                    <ComboBox x:Name="RetentionBox" AutomationProperties.Name="保持期間" Width="120" Height="26" HorizontalAlignment="Left"
+                              DisplayMemberPath="Label" />
+                    <TextBlock Style="{StaticResource SubTextStyle}" Margin="0,4,0,0"
+                               Text="この期間より前に使った履歴は消します。★キープした履歴は期限を過ぎても残します。" />
 
-        <DockPanel Margin="0,18,0,0">
-            <Button x:Name="ResetAllButton" DockPanel.Dock="Left" Content="すべて初期状態に戻す" Margin="0"
-                    Style="{StaticResource DialogButtonStyle}" Click="OnResetAllClick" />
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button x:Name="OkButton" Content="OK" IsDefault="True" Style="{StaticResource DialogButtonStyle}"
-                        Click="OnOkClick" />
-                <Button Content="キャンセル" IsCancel="True" Style="{StaticResource DialogButtonStyle}" />
-            </StackPanel>
-        </DockPanel>
-    </StackPanel>
+                    <DockPanel>
+                        <Button x:Name="ResetExcludePatternsButton" DockPanel.Dock="Right" Content="既定に戻す"
+                                VerticalAlignment="Bottom" Margin="0,0,0,6" Height="24" Padding="10,0"
+                                Style="{StaticResource ToolbarButtonStyle}" Click="OnResetExcludePatternsClick" />
+                        <TextBlock Text="記録しないファイル（除外パターン）" Style="{StaticResource SectionHeaderStyle}" />
+                    </DockPanel>
+                    <TextBox x:Name="ExcludePatternsBox" AutomationProperties.Name="記録しないファイル（除外パターン）" Height="130" AcceptsReturn="True" TextWrapping="NoWrap"
+                             VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                             FontFamily="Consolas, MS Gothic" />
+                    <TextBlock Style="{StaticResource SubTextStyle}" Margin="0,4,0,0"
+                               Text="1 行に 1 つ。* と ? が使えます。\ を含むパターンはフルパスと、含まないパターンはファイル名と照合します。# で始まる行はコメントです。" />
+
+                    <TextBlock Text="削除した履歴" Style="{StaticResource SectionHeaderStyle}" />
+                    <StackPanel Orientation="Horizontal">
+                        <Button x:Name="DeletedHistoryButton" Content="削除した履歴を元に戻す..." Height="26" Padding="12,0"
+                                Margin="0" Style="{StaticResource ToolbarButtonStyle}" Click="OnDeletedHistoryClick" />
+                    </StackPanel>
+                    <TextBlock Style="{StaticResource SubTextStyle}" Margin="0,4,0,0"
+                               Text="履歴から削除したファイルを選んで、一覧に戻せます（すぐに反映されます）。" />
+
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+            <TabItem x:Name="HotkeyTab" Header="ホットキー">
+                <ScrollViewer x:Name="HotkeyTabScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="16,2,16,12">
+                    <TextBlock Text="ホットキー（履歴画面の呼び出し）" Style="{StaticResource SectionHeaderStyle}" />
+                    <CheckBox x:Name="HotkeyEnabledBox" Content="ホットキーを使う" Margin="0,0,0,6"
+                              Checked="OnHotkeyInputChanged" Unchecked="OnHotkeyInputChanged" />
+                    <StackPanel Orientation="Horizontal"
+                                IsEnabled="{Binding IsChecked, ElementName=HotkeyEnabledBox}">
+                        <CheckBox x:Name="CtrlBox" Content="Ctrl" VerticalAlignment="Center" Margin="0,0,12,0"
+                                  Checked="OnHotkeyInputChanged" Unchecked="OnHotkeyInputChanged" />
+                        <CheckBox x:Name="AltBox" Content="Alt" VerticalAlignment="Center" Margin="0,0,12,0"
+                                  Checked="OnHotkeyInputChanged" Unchecked="OnHotkeyInputChanged" />
+                        <CheckBox x:Name="ShiftBox" Content="Shift" VerticalAlignment="Center" Margin="0,0,12,0"
+                                  Checked="OnHotkeyInputChanged" Unchecked="OnHotkeyInputChanged" />
+                        <CheckBox x:Name="WinBox" Content="Win" VerticalAlignment="Center" Margin="0,0,12,0"
+                                  Checked="OnHotkeyInputChanged" Unchecked="OnHotkeyInputChanged" />
+                        <TextBlock Text="+" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource BaseTextStyle}" />
+                        <ComboBox x:Name="KeyBox" AutomationProperties.Name="ホットキーのキー" Width="80" Height="26" SelectionChanged="OnHotkeyInputChanged" />
+                    </StackPanel>
+                    <!-- 選んだ組み合わせが使えるかを、変更のたびにその場で表示する -->
+                    <TextBlock x:Name="HotkeyStatusText" Margin="0,6,0,0" TextWrapping="Wrap" Visibility="Collapsed" />
+                    <TextBlock Style="{StaticResource SubTextStyle}" Margin="0,4,0,0"
+                               Text="設定画面を開いている間はホットキーを解除しています。" />
+
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+    </DockPanel>
 </Window>

@@ -306,8 +306,55 @@ public sealed class MainWindowTests : IDisposable
     {
         ShowWindow();
         var searchRow = Assert.NotNull(FindAncestorOf<DockPanel>(_window.KeptOnlyToggle));
-        var buttons = searchRow.Children.OfType<Button>().Select(b => b.Content as string).ToList();
-        Assert.Equal(0, buttons.Count, $"検索行に設定・ヘルプのボタンを置かない（{string.Join(", ", buttons)}）");
+        var buttons = searchRow.Children.OfType<Button>().ToList();
+        Assert.Equal(1, buttons.Count, "検索行のボタンは更新だけ（設定・ヘルプはメニューバー）");
+        Assert.Same(_window.RefreshButton, buttons[0]);
+    }
+
+    /// <summary>文字の実際に描かれる部分（インク）の高さ。フォントの行の高さではなく見た目の大きさを比べるため。</summary>
+    private static double InkHeight(TextBlock text)
+        => new FormattedText(text.Text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
+            new Typeface(text.FontFamily, text.FontStyle, text.FontWeight, text.FontStretch), text.FontSize,
+            Brushes.Black, VisualTreeHelper.GetDpi(text).PixelsPerDip).Extent;
+
+    [Test]
+    public void RefreshIcon_LooksAsLargeAsKeptOnlyStar_AndIsAligned()
+    {
+        ShowWindow();
+        var icon = _window.RefreshIcon;
+        var star = _window.KeptOnlyStar;
+        Assert.Equal("\uE72C", icon.Text, "Windows 標準のアイコンフォントの「更新」（文字の ↻ は小さく下にずれるので使わない）");
+        Assert.NotNull(FindVisual<TextBlock>(_window.RefreshButton, t => t.Text == "更新"), "「更新」の文字");
+
+        var iconInk = InkHeight(icon);
+        var starInk = InkHeight(star);
+        Assert.True(Math.Abs(iconInk - starInk) <= starInk * 0.2,
+            $"アイコンと「キープのみ」の星の見た目の大きさをそろえる（アイコン {iconInk:0.0} / 星 {starInk:0.0}）");
+
+        var iconCenter = icon.TranslatePoint(new Point(0, icon.ActualHeight / 2), _window).Y;
+        var starCenter = star.TranslatePoint(new Point(0, star.ActualHeight / 2), _window).Y;
+        Assert.True(Math.Abs(iconCenter - starCenter) <= 2.0, $"上下の位置をそろえる（アイコン {iconCenter:0.0} / 星 {starCenter:0.0}）");
+    }
+
+    [Test]
+    public void RefreshButton_IsRightOfKeptOnly_AndRequestsRefresh()
+    {
+        ShowWindow();
+        var toggle = _window.KeptOnlyToggle;
+        var refresh = _window.RefreshButton;
+        var toggleRight = toggle.TranslatePoint(new Point(toggle.ActualWidth, 0), _window).X;
+        var refreshLeft = refresh.TranslatePoint(new Point(0, 0), _window).X;
+        Assert.True(refreshLeft >= toggleRight, $"「キープのみ」の右に置く（キープのみの右端 {toggleRight:0} / 更新の左端 {refreshLeft:0}）");
+        var searchRow = Assert.NotNull(FindAncestorOf<DockPanel>(toggle));
+        Assert.True(searchRow.Children.OfType<FrameworkElement>().All(e =>
+                ReferenceEquals(e, refresh) || e.TranslatePoint(new Point(0, 0), _window).X < refreshLeft),
+            "検索行のいちばん右");
+        Assert.Contains("読み直", refresh.ToolTip as string, "何をするかをツールチップで示す");
+
+        var requested = 0;
+        _window.RefreshRequested += (_, _) => requested++;
+        refresh.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        Assert.Equal(1, requested, "押すと更新を依頼する");
     }
 
     [Test]
@@ -347,7 +394,7 @@ public sealed class MainWindowTests : IDisposable
             Assert.Same(_window, about.Owner, "履歴画面の上に出す");
             var version = typeof(MainWindow).Assembly.GetName().Version!;
             Assert.Equal("バージョン " + version.ToString(3), about.VersionText.Text, "アプリのバージョン（csproj の Version）");
-            Assert.Equal("1.0.0", AboutWindow.AppVersion);
+            Assert.Equal("1.1.0", AboutWindow.AppVersion);
             Assert.Equal("KeepHistory", about.ProductText.Text);
             Assert.Equal("作成者: Tomoaki Bessho", about.AuthorText.Text, "作成者を表示");
             Assert.Equal("Tomoaki Bessho", AboutWindow.Author, "csproj の作成者から読む");
@@ -551,6 +598,167 @@ public sealed class MainWindowTests : IDisposable
         Assert.Equal(0, _window.HistoryGrid.Items.Count);
         _vm.ToggleKept(new[] { _store.Find(@"C:\Old\gone.txt")! });
         Assert.Equal(1, _window.HistoryGrid.Items.Count, "キープのみ");
+    }
+
+    /// <summary>行の中で、強調（太字）になっている文字列。</summary>
+    private List<string> HighlightedTexts(HistoryEntry entry)
+    {
+        var row = (DataGridRow)_window.HistoryGrid.ItemContainerGenerator.ContainerFromItem(entry);
+        var result = new List<string>();
+        void Walk(DependencyObject node)
+        {
+            if (node is TextBlock tb)
+            {
+                foreach (var run in tb.Inlines.OfType<System.Windows.Documents.Run>())
+                {
+                    if (run.FontWeight == FontWeights.Bold) result.Add(run.Text);
+                }
+            }
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++) Walk(VisualTreeHelper.GetChild(node, i));
+        }
+        Walk(Assert.NotNull(row));
+        return result;
+    }
+
+    [Test]
+    public void Search_HighlightsMatchedPartsInFileNameAndFolder()
+    {
+        ShowWindow();
+        _window.SearchBox.Text = "ＤＯＣＳ　ｂｕｄ";
+        UiTestHost.DoEvents();
+        var entry = _store.Find(@"C:\Docs\budget.xlsx")!;
+        Assert.SequenceEqual(new[] { "bud", "Docs" }, HighlightedTexts(entry).OrderBy(t => t), "ファイル名とフォルダの一致部分を強調（全角の検索語でも）");
+        var cell = Assert.NotNull(FindVisual<TextBlock>(
+            (DataGridRow)_window.HistoryGrid.ItemContainerGenerator.ContainerFromItem(entry), t => t.Text == "budget.xlsx"), "ファイル名の全文は変わらない");
+        var highlighted = cell.Inlines.OfType<System.Windows.Documents.Run>().First(r => r.FontWeight == FontWeights.Bold);
+        Assert.Same(Application.Current.FindResource("HighlightBrush"), highlighted.Background, "強調の背景色");
+        Assert.Same(Application.Current.FindResource("HighlightTextBrush"), highlighted.Foreground, "強調の文字色（選んだ行の白い文字の上でも読める）");
+
+        _window.SearchBox.Text = "";
+        UiTestHost.DoEvents();
+        Assert.Equal(0, HighlightedTexts(entry).Count, "検索語を消したら強調も消える");
+    }
+
+    [Test]
+    public void F5_RequestsRefresh_FromSearchBoxAndGrid()
+    {
+        ShowWindow();
+        var requested = 0;
+        _window.RefreshRequested += (_, _) => requested++;
+        _window.SearchBox.Focus();
+        PressKey(Key.F5);
+        Assert.Equal(1, requested, "検索ボックスで F5");
+        SelectAndFocusRow(_store.Find(@"C:\Docs\budget.xlsx")!);
+        PressKey(Key.F5);
+        Assert.Equal(2, requested, "一覧で F5");
+    }
+
+    [Test]
+    public void EmptyMessage_ExplainsWhyNothingIsShown()
+    {
+        ShowWindow();
+        Assert.Equal(Visibility.Collapsed, _window.EmptyMessageText.Visibility, "履歴があれば出さない");
+
+        _window.SearchBox.Text = "存在しない語";
+        UiTestHost.DoEvents();
+        Assert.Equal(Visibility.Visible, _window.EmptyMessageText.Visibility, "絞り込みで 0 件なら出す");
+        Assert.Contains("条件に一致する履歴はありません", _window.EmptyMessageText.Text);
+
+        _window.SearchBox.Text = "";
+        _vm.Delete(_store.Entries.ToList());
+        UiTestHost.DoEvents();
+        Assert.Equal(Visibility.Visible, _window.EmptyMessageText.Visibility);
+        Assert.Contains("履歴はまだありません", _window.EmptyMessageText.Text, "履歴そのものが無いときは別の案内");
+
+        _store.Register(@"C:\new.txt", Now, Now);
+        _vm.NotifyStoreChanged();
+        UiTestHost.DoEvents();
+        Assert.Equal(Visibility.Collapsed, _window.EmptyMessageText.Visibility, "履歴が入ったら消える");
+    }
+
+    [Test]
+    public void CopyFile_PutsTheFileOnClipboardForPasting()
+    {
+        ShowWindow();
+        DataObject? copied = null;
+        _window.SetClipboardData = data => copied = data;
+        _window.HistoryGrid.SelectedItem = _store.Find(@"C:\Docs\budget.xlsx")!;
+        _window.CopyFileMenuItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+
+        var data = Assert.NotNull(copied, "クリップボードに入れる");
+        Assert.SequenceEqual(new[] { @"C:\Docs\budget.xlsx" }, data.GetFileDropList().Cast<string>(), "エクスプローラーに貼り付けられる形（FileDrop）");
+        var effect = (System.IO.MemoryStream)data.GetData("Preferred DropEffect");
+        Assert.Equal((int)DragDropEffects.Copy, BitConverter.ToInt32(effect.ToArray(), 0), "貼り付けは移動ではなくコピー");
+    }
+
+    [Test]
+    public void CopyFile_And_OpenWith_MissingFile_ShowsStatusInstead()
+    {
+        ShowWindow();
+        var missing = _store.Find(@"C:\Old\gone.txt")!;
+        missing.IsMissing = true;
+        var copied = 0;
+        var opened = 0;
+        _window.SetClipboardData = _ => copied++;
+        _window.ShowOpenWith = (_, _) =>
+        {
+            opened++;
+            return true;
+        };
+        _window.HistoryGrid.SelectedItem = missing;
+
+        _window.CopyFileMenuItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        _window.OpenWithMenuItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+
+        Assert.Equal(0, copied, "見つからないファイルはコピーしない");
+        Assert.Equal(0, opened, "見つからないファイルは開かない");
+        Assert.Contains("ファイルが見つかりません", _window.StatusMessageText.Text);
+    }
+
+    [Test]
+    public void OpenWith_ShowsWindowsDialogForTheFile_AndReportsFailure()
+    {
+        ShowWindow();
+        IntPtr owner = IntPtr.Zero;
+        string? path = null;
+        var dialogs = new List<string>();
+        _window.ShowMessage = dialogs.Add;
+        _window.ShowOpenWith = (o, p) =>
+        {
+            owner = o;
+            path = p;
+            return true;
+        };
+        _window.HistoryGrid.SelectedItem = _store.Find(@"C:\Docs\budget.xlsx")!;
+        _window.OpenWithMenuItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Assert.Equal(@"C:\Docs\budget.xlsx", path, "選んだファイルで「プログラムから開く」を出す");
+        Assert.NotEqual(IntPtr.Zero, owner, "履歴画面の上に出す");
+        Assert.Equal(0, dialogs.Count);
+
+        _window.ShowOpenWith = (_, _) => false;
+        _window.OpenWithMenuItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Assert.Equal(1, dialogs.Count, "出せなかったら知らせる");
+    }
+
+    [Test]
+    public void ExcludeMenu_RequestsPatternsForFileFolderAndExtension()
+    {
+        ShowWindow();
+        var requests = new List<ExcludeRequestEventArgs>();
+        _window.ExcludeRequested += (_, e) => requests.Add(e);
+        var entry = _store.Find(@"C:\Docs\budget.xlsx")!;
+        _window.HistoryGrid.SelectedItem = entry;
+        _window.UpdateExcludeMenu(entry);
+        Assert.Equal("この拡張子（.xlsx）を記録しない", _window.ExcludeExtensionMenuItem.Header, "選んだ行の拡張子を示す");
+
+        _window.ExcludeFileMenuItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        _window.ExcludeFolderMenuItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        _window.ExcludeExtensionMenuItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Assert.SequenceEqual(new[] { @"C:\Docs\budget.xlsx", @"C:\Docs\*", "*.xlsx" }, requests.Select(r => r.Pattern));
+        Assert.Contains("budget.xlsx", requests[0].Description);
+
+        _window.UpdateExcludeMenu(new HistoryEntry(@"C:\Tools\Makefile", Now));
+        Assert.Equal(Visibility.Collapsed, _window.ExcludeExtensionMenuItem.Visibility, "拡張子が無ければ出さない");
     }
 
     [Test]
@@ -788,6 +996,60 @@ public sealed class MainWindowTests : IDisposable
         PressKey(Key.Escape);
         if (!otherClosed) { other.AllowClose = true; other.Close(); }
         Assert.True(otherClosed, "一覧からの Esc も閉じる");
+    }
+
+    private static readonly Rect TestWorkArea = new(100, 50, 1600, 900);
+
+    private void UseTestScreens()
+    {
+        _window.WorkAreaAtCursor = () => TestWorkArea;
+        _window.AllWorkAreas = () => new[] { TestWorkArea };
+    }
+
+    [Test]
+    public void Placement_MouseScreenCenter_CentersOnCursorScreenEveryTime()
+    {
+        UseTestScreens();
+        _window.ApplyLayout(new AppSettings { WindowWidth = 800, WindowHeight = 500, Placement = WindowPlacementMode.MouseScreenCenter });
+        ShowWindow();
+        Assert.Equal(100 + 400.0, _window.Left, "マウスのある画面の中央");
+        Assert.Equal(50 + 200.0, _window.Top);
+
+        _window.Left = 300;
+        _window.HideToTray();
+        ShowWindow();
+        Assert.Equal(100 + 400.0, _window.Left, "呼び出すたびに中央へ");
+    }
+
+    [Test]
+    public void Placement_LastPosition_UsesSavedPosition_OrCentersIfOffScreen()
+    {
+        UseTestScreens();
+        _window.ApplyLayout(new AppSettings
+        {
+            WindowWidth = 800, WindowHeight = 500, Placement = WindowPlacementMode.LastPosition, WindowLeft = 150, WindowTop = 80,
+        });
+        ShowWindow();
+        Assert.Equal(150.0, _window.Left, "前回の位置");
+        Assert.Equal(80.0, _window.Top);
+
+        _window.Left = 700;
+        _window.HideToTray();
+        ShowWindow();
+        Assert.Equal(700.0, _window.Left, "隠す前の位置に出す");
+
+        var captured = new AppSettings();
+        _window.CaptureLayout(captured);
+        Assert.Equal(700.0, captured.WindowLeft, "位置を保存する");
+
+        var other = new MainWindow(_vm) { WorkAreaAtCursor = () => TestWorkArea, AllWorkAreas = () => new[] { TestWorkArea } };
+        other.ApplyLayout(new AppSettings
+        {
+            WindowWidth = 800, WindowHeight = 500, Placement = WindowPlacementMode.LastPosition, WindowLeft = 5000, WindowTop = 80,
+        });
+        other.PlaceBeforeShow();
+        Assert.Equal(100 + 400.0, other.Left, "前回の位置が画面外（外したモニター）なら中央");
+        other.Close();
     }
 
     [Test]

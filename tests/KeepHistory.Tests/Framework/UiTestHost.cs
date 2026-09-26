@@ -11,6 +11,7 @@ namespace KeepHistory.Tests.Framework;
 public static class UiTestHost
 {
     public const string SharedResourceUri = "pack://application:,,,/KeepHistory;component/Themes/Shared.xaml";
+    public const string LightColorsUri = "pack://application:,,,/KeepHistory;component/Themes/Colors.Light.xaml";
 
     private static bool _resourcesLoaded;
 
@@ -19,6 +20,8 @@ public static class UiTestHost
         var app = Application.Current ?? new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         if (!_resourcesLoaded)
         {
+            // 製品の App.xaml と同じ順（色 → スタイル）
+            app.Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri(LightColorsUri, UriKind.Absolute) });
             app.Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri(SharedResourceUri, UriKind.Absolute) });
             _resourcesLoaded = true;
         }

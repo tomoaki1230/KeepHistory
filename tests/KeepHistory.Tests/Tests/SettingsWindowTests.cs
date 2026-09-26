@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using KeepHistory.Models;
 using KeepHistory.Services;
@@ -287,6 +288,131 @@ public sealed class SettingsWindowTests : IDisposable
         var text = SettingsWindow.BuildRemovalMessage(4, 0);
         Assert.Contains("4 件", text);
         Assert.False(text.Contains("保持期間を過ぎた履歴"), "0 件の理由は書かない");
+    }
+
+    [Test]
+    public void StartupPlacementAndTheme_LoadAndBuild()
+    {
+        var window = new SettingsWindow(new AppSettings
+        {
+            StartWithWindows = true, Placement = WindowPlacementMode.LastPosition, Theme = AppTheme.Dark,
+        }, _ => true);
+        try
+        {
+            Assert.Equal(true, window.StartWithWindowsBox.IsChecked);
+            Assert.Equal("前回の位置", (window.PlacementBox.SelectedItem as Choice<WindowPlacementMode>)?.Label);
+            Assert.Equal("ダーク", (window.ThemeBox.SelectedItem as Choice<AppTheme>)?.Label);
+
+            window.StartWithWindowsBox.IsChecked = false;
+            window.PlacementBox.SelectedIndex = 0;
+            window.ThemeBox.SelectedIndex = 1;
+            Assert.True(window.TryBuildResult(out var result, out var error), error);
+            Assert.False(result.StartWithWindows);
+            Assert.Equal(WindowPlacementMode.MouseScreenCenter, result.Placement);
+            Assert.Equal(AppTheme.Light, result.Theme);
+        }
+        finally
+        {
+            window.Close();
+        }
+        Assert.Equal("マウスのある画面の中央", ((Choice<WindowPlacementMode>)new SettingsWindow(new AppSettings(), _ => true).PlacementBox.SelectedItem).Label, "既定");
+    }
+
+    private static TabItem? TabOf(DependencyObject element)
+    {
+        for (var current = element; current != null; current = LogicalTreeHelper.GetParent(current))
+        {
+            if (current is TabItem tab) return tab;
+        }
+        return null;
+    }
+
+    [Test]
+    public void Tabs_GroupSettings()
+    {
+        Assert.SequenceEqual(new[] { "全般", "履歴", "ホットキー" },
+            _window.SettingsTabs.Items.OfType<TabItem>().Select(t => t.Header as string), "設定を 3 つのタブに分ける");
+        foreach (var element in new FrameworkElement[] { _window.StayResidentBox, _window.StartWithWindowsBox, _window.PlacementBox, _window.ThemeBox })
+        {
+            Assert.Same(_window.GeneralTab, TabOf(element), element.Name + " は「全般」");
+        }
+        foreach (var element in new FrameworkElement[] { _window.RetentionBox, _window.ExcludePatternsBox, _window.ResetExcludePatternsButton, _window.DeletedHistoryButton })
+        {
+            Assert.Same(_window.HistoryTab, TabOf(element), element.Name + " は「履歴」");
+        }
+        foreach (var element in new FrameworkElement[] { _window.HotkeyEnabledBox, _window.CtrlBox, _window.KeyBox, _window.HotkeyStatusText })
+        {
+            Assert.Same(_window.HotkeyTab, TabOf(element), element.Name + " は「ホットキー」");
+        }
+        foreach (var element in new FrameworkElement[] { _window.OkButton, _window.ResetAllButton, _window.ErrorText })
+        {
+            Assert.Null(TabOf(element), element.Name + " はタブの外（どのタブでも見える）");
+        }
+        Assert.Same(_window.GeneralTab, _window.SettingsTabs.SelectedItem, "開いたときは「全般」");
+    }
+
+    [Test]
+    public void Tabs_EveryTabFitsAndHeightStaysTheSame()
+    {
+        _window.Show();
+        UiTestHost.DoEvents();
+        var height = _window.ActualHeight;
+        foreach (var tab in _window.SettingsTabs.Items.OfType<TabItem>())
+        {
+            _window.SettingsTabs.SelectedItem = tab;
+            UiTestHost.DoEvents();
+            var scroll = Assert.NotNull(tab.Content as ScrollViewer, "中身はスクロールできる入れ物に入れる（万一はみ出しても隠れない）");
+            Assert.Equal(0.0, scroll.ScrollableHeight, $"「{tab.Header}」の中身がスクロールせずに収まる");
+            Assert.Equal(height, _window.ActualHeight, $"「{tab.Header}」に切り替えても画面の高さは変わらない");
+        }
+    }
+
+    [Test]
+    public void Tabs_SelectedHeaderIsBold_ButTheContentsAreNot()
+    {
+        _window.Show();
+        UiTestHost.DoEvents();
+        foreach (var tab in _window.SettingsTabs.Items.OfType<TabItem>())
+        {
+            _window.SettingsTabs.SelectedItem = tab;
+            UiTestHost.DoEvents();
+            var header = Assert.NotNull(FindText(tab, (string)tab.Header), "タブの見出し");
+            Assert.Equal(FontWeights.SemiBold, header.FontWeight, $"選んだタブ「{tab.Header}」の見出しは太字");
+        }
+        _window.SettingsTabs.SelectedItem = _window.GeneralTab;
+        UiTestHost.DoEvents();
+        Assert.Equal(FontWeights.Normal, _window.StayResidentBox.FontWeight, "タブの中身は太字にしない（見出しの太字が受け継がれない）");
+        Assert.Equal(FontWeights.Normal, _window.PlacementBox.FontWeight);
+        Assert.Equal(FontWeights.Normal, Assert.NotNull(FindText(_window.HistoryTab, "履歴")).FontWeight, "選んでいないタブの見出しは普通の太さ");
+    }
+
+    private static TextBlock? FindText(DependencyObject root, string text)
+    {
+        for (int i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = System.Windows.Media.VisualTreeHelper.GetChild(root, i);
+            if (child is TextBlock t && t.Text == text) return t;
+            var found = FindText(child, text);
+            if (found != null) return found;
+        }
+        return null;
+    }
+
+    [Test]
+    public void Error_SwitchesToTheTabWithTheProblem()
+    {
+        _window.SettingsTabs.SelectedItem = _window.GeneralTab;
+        _window.CtrlBox.IsChecked = false;
+        _window.AltBox.IsChecked = false;
+        Assert.False(_window.TryAccept());
+        Assert.Same(_window.HotkeyTab, _window.SettingsTabs.SelectedItem, "ホットキーの誤りなら「ホットキー」タブへ");
+        Assert.Equal(Visibility.Visible, _window.ErrorText.Visibility, "エラーはタブの外に出す");
+
+        _window.CtrlBox.IsChecked = true;
+        _window.SettingsTabs.SelectedItem = _window.GeneralTab;
+        _window.RetentionBox.SelectedItem = null;
+        Assert.False(_window.TryAccept());
+        Assert.Same(_window.HistoryTab, _window.SettingsTabs.SelectedItem, "保持期間の誤りなら「履歴」タブへ");
     }
 
     [Test]

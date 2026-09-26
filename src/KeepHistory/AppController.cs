@@ -24,6 +24,7 @@ public sealed class AppController : IDisposable
     private readonly Application _app;
     private readonly DataStore _data;
     private readonly SettingsStorage _settingsStorage;
+    private readonly IStartupRegistration _startup = new RunKeyStartupRegistration();
     private readonly HistoryStore _store = new();
     private readonly RecentFolderScanner _scanner;
     private readonly RecentFolderWatcher _watcher;
@@ -61,6 +62,8 @@ public sealed class AppController : IDisposable
     {
         var firstRun = !_settingsStorage.Exists;
         _settings = _settingsStorage.Load();
+        // 最初の画面（初回確認を含む）から設定の色で出す
+        ThemeManager.Apply(_app, _settings.Theme);
         if (firstRun)
         {
             // 初回起動: 常駐するかを確かめて、すぐに保存する（次回からは聞かない）
@@ -68,6 +71,7 @@ public sealed class AppController : IDisposable
             SaveSettings(confirmed: true);
         }
         ApplySettingsToStore();
+        RepairStartupRegistration();
         _store.Load(_data.LoadHistory(), _data.LoadDeleted());
         _store.Purge(DateTime.Now);
 
@@ -77,6 +81,8 @@ public sealed class AppController : IDisposable
         _window = new MainWindow(_vm) { Icon = AppIcon.GetImageSource() };
         _window.ApplyLayout(_settings);
         _window.SettingsRequested += (_, _) => OpenSettings();
+        _window.RefreshRequested += (_, _) => ForceRefresh();
+        _window.ExcludeRequested += (_, e) => AddExclusion(e.Pattern, e.Description);
         _window.HiddenByUser += (_, _) => SaveSettings();
         _window.Closing += (_, e) =>
         {
@@ -117,6 +123,30 @@ public sealed class AppController : IDisposable
         RefreshMissing();
         _vm.NotifyStoreChanged();
         _window.ShowAndActivate();
+    }
+
+    /// <summary>
+    /// 強制リフレッシュ（「↻ 更新」）。期限切れを消し、ファイルが見つかるかを確かめ直して一覧を作り直し、
+    /// 「最近使った項目」を全体走査し直す。走査中なら終わった後にもう一度走査する（連打しても二重には走らない）。
+    /// </summary>
+    public void ForceRefresh()
+    {
+        if (_store.Purge(DateTime.Now)) SaveHistory();
+        RefreshMissing();
+        _vm?.NotifyStoreChanged();
+        _ = RunFullScanAsync();
+    }
+
+    /// <summary>一覧の右クリック「記録しない」。確認して除外パターンを追加し、設定と履歴を保存する。</summary>
+    private void AddExclusion(string pattern, string description)
+    {
+        var added = ExclusionAdder.TryAdd(_settings, _store, pattern, description,
+            message => MessageBox.Show(_window!, message, "記録しない", MessageBoxButton.OKCancel,
+                MessageBoxImage.Question, MessageBoxResult.Cancel) == MessageBoxResult.OK);
+        if (!added) return;
+        SaveSettings(confirmed: true);
+        SaveHistory();
+        _vm?.NotifyStoreChanged();
     }
 
     public void SaveAll()
@@ -236,6 +266,7 @@ public sealed class AppController : IDisposable
             return;
         }
         _window?.CaptureLayout(_settings);
+        _settings.StartWithWindows = IsStartupRegistered();
         _resetRequested = false;
         var result = _settingsCoordinator.Open(_settings);
         if (_resetRequested)
@@ -250,9 +281,13 @@ public sealed class AppController : IDisposable
             return;
         }
 
+        var startupChanged = result.StartWithWindows != _settings.StartWithWindows;
         _settings = result;
+        if (_window != null) _window.Placement = _settings.Placement;
+        ThemeManager.Apply(_app, _settings.Theme);
         ApplySettingsToStore();
         ApplyResidentMode();
+        if (startupChanged) ApplyStartupRegistration(_settings.StartWithWindows);
         // 常駐をやめたときに画面が隠れていると操作できなくなるので出す
         if (!_settings.StayResident && _window != null && !_window.IsVisible) ShowMainWindow();
         var removed = _store.RemoveExcluded();
@@ -316,6 +351,9 @@ public sealed class AppController : IDisposable
     {
         _settings = new AppSettings();
         _window?.ResetLayout();
+        if (_window != null) _window.Placement = _settings.Placement;
+        ThemeManager.Apply(_app, _settings.Theme);
+        ApplyStartupRegistration(false);
         ApplySettingsToStore();
         ApplyResidentMode();
         if (_window != null && !_window.IsVisible) ShowMainWindow();
@@ -343,6 +381,60 @@ public sealed class AppController : IDisposable
             dialog.ShowInTaskbar = true;
         }
         return dialog.ShowDialog() == true ? dialog.Result : null;
+    }
+
+    private bool IsStartupRegistered()
+    {
+        try
+        {
+            return _startup.GetCommand() != null;
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException)
+        {
+            ErrorLog.Write("スタートアップの登録を読めませんでした。", ex);
+            return false;
+        }
+    }
+
+    /// <summary>Windows の起動時に起動する登録・解除。失敗したら知らせる。</summary>
+    private void ApplyStartupRegistration(bool enable)
+    {
+        try
+        {
+            if (!enable)
+            {
+                _startup.Disable();
+                return;
+            }
+            var exe = StartupCommand.ExecutablePath(Environment.ProcessPath, AppContext.BaseDirectory)
+                      ?? throw new IOException("KeepHistory.exe の場所が分かりません。");
+            _startup.Enable(StartupCommand.Build(exe));
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException)
+        {
+            ErrorLog.Write("スタートアップの登録を変更できませんでした。", ex);
+            MessageBox.Show($"Windows の起動時に起動する設定を変更できませんでした。\n\n{ex.Message}",
+                "KeepHistory", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    /// <summary>
+    /// 登録されている exe が無くなっていたら（exe を移動した）、今の exe で登録し直す。
+    /// 別の場所の KeepHistory が登録されていて、その exe があるなら触らない。
+    /// </summary>
+    private void RepairStartupRegistration()
+    {
+        try
+        {
+            var registered = StartupCommand.ExtractExePath(_startup.GetCommand());
+            if (registered == null || File.Exists(registered)) return;
+            var exe = StartupCommand.ExecutablePath(Environment.ProcessPath, AppContext.BaseDirectory);
+            if (exe != null) _startup.Enable(StartupCommand.Build(exe));
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException)
+        {
+            ErrorLog.Write("スタートアップの登録を確かめられませんでした。", ex);
+        }
     }
 
     private void ApplySettingsToStore()

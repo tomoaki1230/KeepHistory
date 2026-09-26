@@ -4,18 +4,19 @@
         Title="KeepHistory へようこそ"
         Width="480" SizeToContent="Height" ResizeMode="NoResize"
         WindowStartupLocation="CenterScreen" ShowInTaskbar="True" Topmost="True"
-        Background="{StaticResource WindowBackgroundBrush}"
+        Background="{DynamicResource WindowBackgroundBrush}"
+        Foreground="{DynamicResource TextBrush}"
         FocusManager.FocusedElement="{Binding ElementName=StayResidentButton}">
     <StackPanel Margin="24,20,24,16">
         <TextBlock Text="通知領域に常駐しますか？" FontSize="16" FontWeight="SemiBold" Style="{StaticResource BaseTextStyle}" />
         <TextBlock Margin="0,10,0,6" Style="{StaticResource BaseTextStyle}" TextWrapping="Wrap"
                    Text="常駐すると、画面を閉じても KeepHistory が通知領域に残り、次のようなメリットがあります。" />
-        <ItemsControl x:Name="BenefitList" Margin="8,0,0,0">
+        <ItemsControl x:Name="BenefitList" AutomationProperties.Name="常駐するメリット" Margin="8,0,0,0">
             <ItemsControl.ItemTemplate>
                 <DataTemplate>
                     <BulletDecorator Margin="0,3,0,0">
                         <BulletDecorator.Bullet>
-                            <TextBlock Text="✓" Foreground="{StaticResource SuccessBrush}" Margin="0,0,8,0" />
+                            <TextBlock Text="✓" Foreground="{DynamicResource SuccessBrush}" Margin="0,0,8,0" />
                         </BulletDecorator.Bullet>
                         <TextBlock Text="{Binding}" TextWrapping="Wrap" Style="{StaticResource BaseTextStyle}" />
                     </BulletDecorator>

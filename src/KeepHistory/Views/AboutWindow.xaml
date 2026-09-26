@@ -4,7 +4,8 @@
         Title="バージョン情報"
         SizeToContent="WidthAndHeight" ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
-        Background="{StaticResource WindowBackgroundBrush}"
+        Background="{DynamicResource WindowBackgroundBrush}"
+        Foreground="{DynamicResource TextBrush}"
         FocusManager.FocusedElement="{Binding ElementName=CloseButton}">
     <StackPanel Margin="24,20,24,16" MinWidth="320">
         <StackPanel Orientation="Horizontal">

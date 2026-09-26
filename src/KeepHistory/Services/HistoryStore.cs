@@ -126,7 +126,7 @@ public sealed class HistoryStore
     /// </summary>
     public (int Excluded, int Expired) CountRemovals(ExclusionFilter exclusion, int retentionDays, DateTime now)
     {
-        var limit = now.AddDays(-retentionDays);
+        var limit = retentionDays >= (now - DateTime.MinValue).TotalDays ? DateTime.MinValue : now.AddDays(-retentionDays);
         int excluded = 0, expired = 0;
         foreach (var entry in _entries.Values)
         {

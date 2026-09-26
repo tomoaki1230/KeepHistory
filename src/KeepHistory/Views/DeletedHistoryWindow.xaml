@@ -4,7 +4,8 @@
         Title="削除した履歴を元に戻す"
         Width="720" Height="440" MinWidth="480" MinHeight="280"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
-        Background="{StaticResource WindowBackgroundBrush}"
+        Background="{DynamicResource WindowBackgroundBrush}"
+        Foreground="{DynamicResource TextBrush}"
         FocusManager.FocusedElement="{Binding ElementName=DeletedGrid}">
     <DockPanel Margin="16">
         <TextBlock DockPanel.Dock="Top" Style="{StaticResource SubTextStyle}" Margin="0,0,0,8"
@@ -17,7 +18,7 @@
             <TextBlock x:Name="ResultText" VerticalAlignment="Center" Style="{StaticResource SubTextStyle}" />
         </DockPanel>
         <Grid>
-            <DataGrid x:Name="DeletedGrid" Style="{StaticResource HistoryGridStyle}"
+            <DataGrid x:Name="DeletedGrid" AutomationProperties.Name="削除した履歴" Style="{StaticResource HistoryGridStyle}"
                       CellStyle="{StaticResource HistoryCellStyle}"
                       AutoGenerateColumns="False" IsReadOnly="True"
                       SelectionMode="Extended" SelectionUnit="FullRow"

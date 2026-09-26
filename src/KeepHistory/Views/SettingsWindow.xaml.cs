@@ -19,6 +19,9 @@ public partial class SettingsWindow : Window
     private readonly Func<AppSettings, (int Excluded, int Expired)>? _previewRemoval;
     private bool _loading = true;
 
+    // 入力の誤りがあったタブ（TryBuildResult が入れる）
+    private System.Windows.Controls.TabItem? _errorTab;
+
     /// <param name="isHotkeyAvailable">ホットキーが使えるかの確認（既定は実際に登録を試す。テストで差し替える）。</param>
     /// <param name="openDeletedHistory">「削除した履歴を元に戻す」画面を開く処理。null ならボタンを使えなくする。</param>
     /// <param name="resetAll">「すべて初期状態に戻す」を確認で OK したときの処理（設定・履歴の削除）。null ならボタンを使えなくする。</param>
@@ -38,6 +41,8 @@ public partial class SettingsWindow : Window
             MessageBoxButton.OKCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel) == MessageBoxResult.OK;
         KeyBox.ItemsSource = KeyChoices;
         RetentionBox.ItemsSource = AppSettings.RetentionChoices;
+        PlacementBox.ItemsSource = PlacementChoices;
+        ThemeBox.ItemsSource = ThemeChoices;
         _source = current.Clone();
         LoadForm(_source);
     }
@@ -66,6 +71,9 @@ public partial class SettingsWindow : Window
         var retentionDays = AppSettings.SnapRetentionDays(settings.RetentionDays);
         RetentionBox.SelectedItem = AppSettings.RetentionChoices.First(c => c.Value == retentionDays);
         StayResidentBox.IsChecked = settings.StayResident;
+        StartWithWindowsBox.IsChecked = settings.StartWithWindows;
+        PlacementBox.SelectedItem = PlacementChoices.FirstOrDefault(c => c.Value == settings.Placement) ?? PlacementChoices[0];
+        ThemeBox.SelectedItem = ThemeChoices.FirstOrDefault(c => c.Value == settings.Theme) ?? ThemeChoices[0];
         ExcludePatternsBox.Text = string.Join(Environment.NewLine, settings.ExcludePatterns);
         HotkeyEnabledBox.IsChecked = settings.Hotkey.Enabled;
         CtrlBox.IsChecked = settings.Hotkey.Control;
@@ -105,6 +113,19 @@ public partial class SettingsWindow : Window
         Available,
     }
 
+    public static IReadOnlyList<Choice<WindowPlacementMode>> PlacementChoices { get; } = new[]
+    {
+        new Choice<WindowPlacementMode>("マウスのある画面の中央", WindowPlacementMode.MouseScreenCenter),
+        new Choice<WindowPlacementMode>("前回の位置", WindowPlacementMode.LastPosition),
+    };
+
+    public static IReadOnlyList<Choice<AppTheme>> ThemeChoices { get; } = new[]
+    {
+        new Choice<AppTheme>("Windows の設定に合わせる", AppTheme.System),
+        new Choice<AppTheme>("ライト", AppTheme.Light),
+        new Choice<AppTheme>("ダーク", AppTheme.Dark),
+    };
+
     /// <summary>ホットキーに使えるキー（System.Windows.Input.Key の名前）。</summary>
     public static IReadOnlyList<string> KeyChoices { get; } =
         Enumerable.Range('A', 26).Select(c => ((char)c).ToString())
@@ -122,10 +143,14 @@ public partial class SettingsWindow : Window
         if (RetentionBox.SelectedItem is not Choice<int> retention)
         {
             error = "保持期間を選んでください。";
+            _errorTab = HistoryTab;
             return false;
         }
         result.RetentionDays = retention.Value;
         result.StayResident = StayResidentBox.IsChecked == true;
+        result.StartWithWindows = StartWithWindowsBox.IsChecked == true;
+        result.Placement = (PlacementBox.SelectedItem as Choice<WindowPlacementMode>)?.Value ?? WindowPlacementMode.MouseScreenCenter;
+        result.Theme = (ThemeBox.SelectedItem as Choice<AppTheme>)?.Value ?? AppTheme.System;
 
         result.ExcludePatterns = ExcludePatternsBox.Text
             .Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.None)
@@ -138,6 +163,7 @@ public partial class SettingsWindow : Window
         if (check is HotkeyCheck.NeedsModifier or HotkeyCheck.Unavailable)
         {
             error = message;
+            _errorTab = HotkeyTab;
             return false;
         }
         result.Hotkey = hotkey;
@@ -177,7 +203,9 @@ public partial class SettingsWindow : Window
         var (check, message) = CheckHotkey(ReadHotkey());
         HotkeyStatusText.Text = message;
         HotkeyStatusText.Visibility = check == HotkeyCheck.Disabled ? Visibility.Collapsed : Visibility.Visible;
-        HotkeyStatusText.Foreground = (System.Windows.Media.Brush)FindResource(check == HotkeyCheck.Available ? "SuccessBrush" : "ErrorBrush");
+        // 色の切り替え（ライト／ダーク）に追従するよう、リソースを参照させる
+        HotkeyStatusText.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty,
+            check == HotkeyCheck.Available ? "SuccessBrush" : "ErrorBrush");
         return check;
     }
 
@@ -209,10 +237,13 @@ public partial class SettingsWindow : Window
     /// </summary>
     internal bool TryAccept()
     {
+        _errorTab = null;
         if (!TryBuildResult(out var result, out var error))
         {
             ErrorText.Text = error;
             ErrorText.Visibility = Visibility.Visible;
+            // 誤りのある項目が見えるよう、そのタブに切り替える
+            if (_errorTab != null) SettingsTabs.SelectedItem = _errorTab;
             return false;
         }
         if (_previewRemoval != null)

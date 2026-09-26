@@ -144,6 +144,29 @@ public sealed class DateAndPersistenceTests : IDisposable
     }
 
     [Test]
+    public void Settings_PlacementThemeAndPosition_RoundTrip_StartupIsNotSaved()
+    {
+        var data = new DataStore(_dir.Path);
+        data.SaveSettings(new AppSettings
+        {
+            Placement = WindowPlacementMode.LastPosition, Theme = AppTheme.Dark, WindowLeft = 120, WindowTop = 40, StartWithWindows = true,
+        });
+        var json = File.ReadAllText(data.SettingsPath);
+        Assert.Contains("\"LastPosition\"", json, "列挙は名前で保存する（読みやすく、並びを変えても壊れない）");
+        Assert.False(json.Contains("StartWithWindows"), "起動時の登録は settings.json に保存しない（Windows の登録が正）");
+
+        var loaded = data.LoadSettings();
+        Assert.Equal(WindowPlacementMode.LastPosition, loaded.Placement);
+        Assert.Equal(AppTheme.Dark, loaded.Theme);
+        Assert.Equal(120.0, loaded.WindowLeft);
+        Assert.Equal(40.0, loaded.WindowTop);
+
+        var defaults = new AppSettings();
+        Assert.Equal(WindowPlacementMode.MouseScreenCenter, defaults.Placement, "既定はマウスのある画面の中央");
+        Assert.Equal(AppTheme.System, defaults.Theme, "既定は Windows に合わせる");
+    }
+
+    [Test]
     public void SettingsExists_IsFalseOnFirstRun()
     {
         var data = new DataStore(_dir.Path);

@@ -54,15 +54,59 @@ public partial class MainWindow : Window
 
     public event EventHandler? SettingsRequested;
 
+    /// <summary>右クリックの「記録しない」が選ばれた（除外パターンの追加を依頼）。</summary>
+    public event EventHandler<ExcludeRequestEventArgs>? ExcludeRequested;
+
+    /// <summary>「↻ 更新」が押された（強制リフレッシュ）。</summary>
+    public event EventHandler? RefreshRequested;
+
     /// <summary>閉じる操作で隠れた。</summary>
     public event EventHandler? HiddenByUser;
 
     internal MainViewModel ViewModel => _vm;
 
+    /// <summary>画面を出す位置（設定）。</summary>
+    public WindowPlacementMode Placement { get; set; } = WindowPlacementMode.MouseScreenCenter;
+
+    /// <summary>保存されていた前回の位置（まだ一度も表示していないときに使う）。</summary>
+    public Point? SavedPosition { get; set; }
+
+    /// <summary>作業領域の取得（テストで差し替える）。</summary>
+    internal Func<Rect> WorkAreaAtCursor { get; set; } = ScreenInfo.WorkAreaAtCursor;
+
+    internal Func<IReadOnlyList<Rect>> AllWorkAreas { get; set; } = ScreenInfo.AllWorkAreas;
+
+    /// <summary>
+    /// 隠れている画面を出す前に位置を決める。「マウスのある画面の中央」なら毎回そこへ、
+    /// 「前回の位置」なら前回の位置へ（モニターを外したなどで画面外なら、マウスのある画面の中央）。
+    /// </summary>
+    internal void PlaceBeforeShow()
+    {
+        var size = new Size(ActualWidth > 0 ? ActualWidth : Width, ActualHeight > 0 ? ActualHeight : Height);
+        if (Placement == WindowPlacementMode.LastPosition)
+        {
+            Point? last = IsLoaded ? new Point(Left, Top) : SavedPosition;
+            if (last is { } p && !double.IsNaN(p.X) && !double.IsNaN(p.Y)
+                && WindowPlacementCalculator.IsReachable(new Rect(p, size), AllWorkAreas()))
+            {
+                Left = p.X;
+                Top = p.Y;
+                return;
+            }
+        }
+        var center = WindowPlacementCalculator.CenterIn(WorkAreaAtCursor(), size);
+        Left = center.X;
+        Top = center.Y;
+    }
+
     /// <summary>表示して前面に出し、検索ボックスにフォーカスする。</summary>
     public void ShowAndActivate()
     {
-        if (!IsVisible) Show();
+        if (!IsVisible)
+        {
+            PlaceBeforeShow();
+            Show();
+        }
         if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
         Activate();
         FocusSearchBox();
@@ -118,6 +162,9 @@ public partial class MainWindow : Window
     /// <summary>保存された列レイアウトとウインドウサイズを反映する。</summary>
     public void ApplyLayout(AppSettings settings)
     {
+        Placement = settings.Placement;
+        SavedPosition = settings.WindowLeft is { } left && settings.WindowTop is { } top ? new Point(left, top) : null;
+
         // 大きいモニターで保存したサイズでも、今の画面の作業領域からはみ出さない
         var work = SystemParameters.WorkArea;
         Width = Math.Max(MinWidth, Math.Min(settings.WindowWidth, work.Width));
@@ -161,6 +208,12 @@ public partial class MainWindow : Window
         var bounds = WindowState == WindowState.Normal ? new Size(ActualWidth > 0 ? ActualWidth : Width, ActualHeight > 0 ? ActualHeight : Height) : RestoreBounds.Size;
         if (!double.IsInfinity(bounds.Width) && bounds.Width > 0) settings.WindowWidth = Math.Round(bounds.Width);
         if (!double.IsInfinity(bounds.Height) && bounds.Height > 0) settings.WindowHeight = Math.Round(bounds.Height);
+        var position = WindowState == WindowState.Normal ? new Point(Left, Top) : RestoreBounds.TopLeft;
+        if (!double.IsNaN(position.X) && !double.IsInfinity(position.X) && !double.IsNaN(position.Y) && !double.IsInfinity(position.Y))
+        {
+            settings.WindowLeft = Math.Round(position.X);
+            settings.WindowTop = Math.Round(position.Y);
+        }
 
         settings.Columns = HistoryGrid.Columns.Select(c => new ColumnLayout
         {
@@ -283,11 +336,95 @@ public partial class MainWindow : Window
         {
             SetClipboardText(BuildCopyText(entries, selector));
         }
-        catch (COMException ex)
+        catch (ExternalException ex)
         {
             ErrorLog.Write("クリップボードにコピーできませんでした。", ex);
         }
     }
+
+    /// <summary>クリップボードへのデータの書き込み（テストで差し替える）。</summary>
+    internal Action<DataObject> SetClipboardData { get; set; } = data => Clipboard.SetDataObject(data, true);
+
+    /// <summary>
+    /// ファイル自体をコピーするデータ。エクスプローラーやメールに貼り付けるとファイルがコピーされる
+    /// （FileDrop と、貼り付け時に移動ではなくコピーにする Preferred DropEffect）。
+    /// </summary>
+    internal static DataObject CreateFileCopyData(string path)
+    {
+        var data = new DataObject();
+        data.SetFileDropList(new System.Collections.Specialized.StringCollection { path });
+        data.SetData("Preferred DropEffect", new MemoryStream(BitConverter.GetBytes((int)DragDropEffects.Copy)));
+        return data;
+    }
+
+    private void CopyFile(HistoryEntry? entry)
+    {
+        if (entry == null) return;
+        ClearStatusMessage();
+        if (entry.IsMissing)
+        {
+            ShowNotFound(entry.Path);
+            return;
+        }
+        try
+        {
+            SetClipboardData(CreateFileCopyData(entry.Path));
+        }
+        catch (ExternalException ex)
+        {
+            ErrorLog.Write("クリップボードにコピーできませんでした。", ex);
+        }
+    }
+
+    /// <summary>「プログラムから開く」画面の表示（テストで差し替える）。失敗したら false。</summary>
+    internal Func<IntPtr, string, bool> ShowOpenWith { get; set; } = ShellActions.ShowOpenWithDialog;
+
+    private void OpenWith(HistoryEntry? entry)
+    {
+        if (entry == null) return;
+        ClearStatusMessage();
+        if (entry.IsMissing)
+        {
+            ShowNotFound(entry.Path);
+            return;
+        }
+        var owner = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+        if (!ShowOpenWith(owner, entry.Path))
+        {
+            ErrorLog.Write($"「プログラムから開く」を表示できませんでした: {entry.Path}");
+            ShowMessage($"「プログラムから開く」を表示できませんでした。\n\n{entry.Path}");
+        }
+    }
+
+    /// <summary>右クリックメニューを開いたとき、選んでいる行に合わせて「この拡張子を記録しない」を作る。</summary>
+    internal void UpdateExcludeMenu(HistoryEntry? entry)
+    {
+        var extension = entry?.Extension ?? string.Empty;
+        ExcludeExtensionMenuItem.Header = $"この拡張子（{extension}）を記録しない";
+        ExcludeExtensionMenuItem.Visibility = extension.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void RequestExclude(Func<HistoryEntry, (string Pattern, string Description)> make)
+    {
+        if (HistoryGrid.SelectedItem is not HistoryEntry entry) return;
+        var (pattern, description) = make(entry);
+        ExcludeRequested?.Invoke(this, new ExcludeRequestEventArgs(pattern, description));
+    }
+
+    private void OnContextMenuOpened(object sender, RoutedEventArgs e) => UpdateExcludeMenu(HistoryGrid.SelectedItem as HistoryEntry);
+
+    private void OnExcludeFileClick(object sender, RoutedEventArgs e)
+        => RequestExclude(entry => (ExclusionPatterns.ForFile(entry.Path), $"ファイル「{entry.FileName}」"));
+
+    private void OnExcludeFolderClick(object sender, RoutedEventArgs e)
+        => RequestExclude(entry => (ExclusionPatterns.ForFolder(entry.FolderPath), $"フォルダ「{entry.FolderPath}」の中のファイル（サブフォルダを含む）"));
+
+    private void OnExcludeExtensionClick(object sender, RoutedEventArgs e)
+        => RequestExclude(entry => (ExclusionPatterns.ForExtension(entry.Extension), $"拡張子「{entry.Extension}」のファイル"));
+
+    private void OnCopyFileClick(object sender, RoutedEventArgs e) => CopyFile(HistoryGrid.SelectedItem as HistoryEntry);
+
+    private void OnOpenWithClick(object sender, RoutedEventArgs e) => OpenWith(HistoryGrid.SelectedItem as HistoryEntry);
 
     private void CopyPaths(IReadOnlyList<HistoryEntry> entries) => CopyToClipboard(entries, e => e.Path);
 
@@ -360,6 +497,12 @@ public partial class MainWindow : Window
         {
             e.Handled = true;
             FocusSearchBox();
+        }
+        else if (e.Key == Key.F5 && Keyboard.Modifiers == ModifierKeys.None)
+        {
+            // 「↻ 更新」と同じ（強制リフレッシュ）
+            e.Handled = true;
+            RefreshRequested?.Invoke(this, EventArgs.Empty);
         }
     }
 
@@ -530,6 +673,8 @@ public partial class MainWindow : Window
     }
 
     private void OnSettingsClick(object sender, RoutedEventArgs e) => SettingsRequested?.Invoke(this, EventArgs.Empty);
+
+    private void OnRefreshClick(object sender, RoutedEventArgs e) => RefreshRequested?.Invoke(this, EventArgs.Empty);
 
     /// <summary>モーダル画面の表示（テストで差し替える）。</summary>
     internal Func<Window, bool?> ShowDialogWindow { get; set; } = window => window.ShowDialog();

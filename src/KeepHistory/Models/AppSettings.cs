@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json.Serialization;
 using KeepHistory.Services;
 
 namespace KeepHistory.Models;
@@ -40,6 +41,25 @@ public sealed class AppSettings
     public double WindowWidth { get; set; } = 960;
     public double WindowHeight { get; set; } = 600;
 
+    /// <summary>画面を出す位置。</summary>
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public WindowPlacementMode Placement { get; set; } = WindowPlacementMode.MouseScreenCenter;
+
+    /// <summary>前回の位置（Placement が LastPosition のとき使う）。無ければ null。</summary>
+    public double? WindowLeft { get; set; }
+    public double? WindowTop { get; set; }
+
+    /// <summary>画面の色（Windows に合わせる／ライト／ダーク）。</summary>
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public AppTheme Theme { get; set; } = AppTheme.System;
+
+    /// <summary>
+    /// Windows の起動時に起動するか。settings.json には保存しない（Windows のスタートアップ登録そのものが正）。
+    /// 設定画面を開く前に登録の状態を入れ、OK したら登録・解除する。
+    /// </summary>
+    [JsonIgnore]
+    public bool StartWithWindows { get; set; }
+
     public List<ColumnLayout> Columns { get; set; } = new();
 
     /// <summary>読み込んだ値を妥当な範囲に収める。</summary>
@@ -55,6 +75,10 @@ public sealed class AppSettings
         Columns.RemoveAll(c => c == null || c.Id == null);
         if (double.IsNaN(WindowWidth) || WindowWidth < 300) WindowWidth = 960;
         if (double.IsNaN(WindowHeight) || WindowHeight < 200) WindowHeight = 600;
+        if (!Enum.IsDefined(Placement)) Placement = WindowPlacementMode.MouseScreenCenter;
+        if (!Enum.IsDefined(Theme)) Theme = AppTheme.System;
+        if (WindowLeft is { } left && (double.IsNaN(left) || double.IsInfinity(left))) WindowLeft = null;
+        if (WindowTop is { } top && (double.IsNaN(top) || double.IsInfinity(top))) WindowTop = null;
         return this;
     }
 
@@ -79,6 +103,29 @@ public sealed class AppSettings
         Hotkey = Hotkey.Clone(),
         WindowWidth = WindowWidth,
         WindowHeight = WindowHeight,
+        Placement = Placement,
+        WindowLeft = WindowLeft,
+        WindowTop = WindowTop,
+        Theme = Theme,
+        StartWithWindows = StartWithWindows,
         Columns = Columns.Select(c => new ColumnLayout { Id = c.Id, Width = c.Width, DisplayIndex = c.DisplayIndex }).ToList(),
     };
+}
+
+/// <summary>画面を出す位置。</summary>
+public enum WindowPlacementMode
+{
+    /// <summary>マウスのある画面の中央（既定）。</summary>
+    MouseScreenCenter,
+    /// <summary>前回の位置（画面外なら中央）。</summary>
+    LastPosition,
+}
+
+/// <summary>画面の色。</summary>
+public enum AppTheme
+{
+    /// <summary>Windows の設定（アプリのモード）に合わせる（既定）。</summary>
+    System,
+    Light,
+    Dark,
 }

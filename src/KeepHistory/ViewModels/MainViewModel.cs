@@ -102,6 +102,15 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public string StatusText => $"表示 {View.Count} 件 / 全 {_store.Entries.Count} 件";
 
+    public const string NoHistoryMessage = "履歴はまだありません。\nファイルを開くと、ここに表示されます。";
+    public const string NoMatchMessage = "条件に一致する履歴はありません。\n検索語や絞り込み（種類・期間・キープのみ）を変えてみてください。";
+
+    /// <summary>一覧が空のときの案内。空でなければ null。</summary>
+    public string? EmptyMessage => View.Count > 0 ? null : _store.Entries.Count == 0 ? NoHistoryMessage : NoMatchMessage;
+
+    /// <summary>一覧で強調する検索語（正規化済み）。</summary>
+    public IReadOnlyList<string> HighlightTerms => _criteria.Query.NormalizedTerms;
+
     /// <summary>絞り込みをやり直す。</summary>
     public void ApplyFilter()
     {
@@ -114,6 +123,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
         };
         View.Refresh();
         OnPropertyChanged(nameof(StatusText));
+        OnPropertyChanged(nameof(HighlightTerms));
+        OnPropertyChanged(nameof(EmptyMessage));
     }
 
     /// <summary>履歴の中身が変わった後に呼ぶ（拡張子の選択肢と表示を作り直す）。</summary>

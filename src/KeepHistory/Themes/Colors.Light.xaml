@@ -1,0 +1,31 @@
+<!-- ライトの色。Colors.Dark.xaml と同じキーをそろえること（テストで検査している） -->
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#F6F7F9" />
+    <SolidColorBrush x:Key="SurfaceBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="BorderBrush" Color="#D5D9E0" />
+    <SolidColorBrush x:Key="TextBrush" Color="#1F2328" />
+    <SolidColorBrush x:Key="SubTextBrush" Color="#6B7280" />
+    <SolidColorBrush x:Key="AccentBrush" Color="#2563EB" />
+    <SolidColorBrush x:Key="AccentSoftBrush" Color="#E8EFFD" />
+    <SolidColorBrush x:Key="RowHoverBrush" Color="#F1F4F9" />
+    <!-- 見つからないファイルの淡色 -->
+    <SolidColorBrush x:Key="MissingTextBrush" Color="#A3A9B3" />
+    <SolidColorBrush x:Key="StarOnBrush" Color="#F2A900" />
+    <SolidColorBrush x:Key="StarOffBrush" Color="#C3C8D0" />
+    <SolidColorBrush x:Key="ErrorBrush" Color="#B42318" />
+    <SolidColorBrush x:Key="SuccessBrush" Color="#1A7F37" />
+    <!-- 検索語に一致した部分の背景 -->
+    <SolidColorBrush x:Key="HighlightBrush" Color="#FFF1B8" />
+    <!-- 一致部分の文字（選んだ行の白い文字の上でも読めるよう、背景に合わせて決める） -->
+    <SolidColorBrush x:Key="HighlightTextBrush" Color="#1F2328" />
+    <SolidColorBrush x:Key="GridLineBrush" Color="#EEF0F3" />
+    <SolidColorBrush x:Key="HeaderBackgroundBrush" Color="#F3F4F6" />
+    <SolidColorBrush x:Key="ControlBackgroundBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="ControlHoverBrush" Color="#EEF1F5" />
+    <SolidColorBrush x:Key="PopupBackgroundBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="ScrollThumbBrush" Color="#C2C7CF" />
+    <!-- 一覧で選んだ行（ライトは Windows 標準と同じ青） -->
+    <SolidColorBrush x:Key="SelectionBrush" Color="#0078D7" />
+    <SolidColorBrush x:Key="SelectionTextBrush" Color="#FFFFFF" />
+</ResourceDictionary>
