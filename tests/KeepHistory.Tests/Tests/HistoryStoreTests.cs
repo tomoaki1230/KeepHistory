@@ -27,6 +27,55 @@ public sealed class HistoryStoreTests
     }
 
     [Test]
+    public void OpenCount_StartsAtOneAndCountsOnlyNewerLinks()
+    {
+        var store = NewStore();
+        store.Register(@"C:\a.txt", Now.AddHours(-3), Now);
+        var entry = store.Find(@"C:\a.txt")!;
+        Assert.Equal(1, entry.OpenCount, "初めて記録したら 1 回");
+
+        store.Register(@"C:\a.txt", Now.AddHours(-2), Now);
+        store.Register(@"C:\a.txt", Now.AddHours(-1), Now);
+        Assert.Equal(3, entry.OpenCount, ".lnk が新しくなるたびに 1 回");
+
+        store.Register(@"C:\a.txt", Now.AddHours(-1), Now);
+        store.Register(@"C:\a.txt", Now.AddHours(-5), Now);
+        Assert.Equal(3, entry.OpenCount, "同じ・古い .lnk（再走査）では数えない");
+    }
+
+    [Test]
+    public void OpenCount_RestartsWhenDeletedAndOpenedAgain()
+    {
+        var store = NewStore();
+        store.Register(@"C:\a.txt", Now.AddHours(-3), Now);
+        store.Register(@"C:\a.txt", Now.AddHours(-2), Now);
+        store.Remove(store.Entries.ToList(), Now);
+        store.Register(@"C:\a.txt", Now.AddMinutes(5), Now.AddMinutes(6));
+        Assert.Equal(1, store.Find(@"C:\a.txt")!.OpenCount, "消した後に開き直したら 1 回から");
+    }
+
+    [Test]
+    public void OpenCount_SurvivesSaveAndLoad_OldRecordsBecomeOne()
+    {
+        var store = NewStore();
+        store.Register(@"C:\a.txt", Now.AddHours(-2), Now);
+        store.Register(@"C:\a.txt", Now.AddHours(-1), Now);
+        var reloaded = NewStore();
+        reloaded.Load(store.ToHistoryRecords(), null);
+        Assert.Equal(2, reloaded.Find(@"C:\a.txt")!.OpenCount);
+
+        var old = NewStore();
+        old.Load(new[]
+        {
+            new Models.HistoryRecord { Path = @"C:\old.txt", LastUsed = "2026-09-01T10:00:00" },
+            new Models.HistoryRecord { Path = @"C:\dup.txt", LastUsed = "2026-09-01T10:00:00", OpenCount = 4 },
+            new Models.HistoryRecord { Path = @"c:\DUP.txt", LastUsed = "2026-09-02T10:00:00", OpenCount = 2 },
+        }, null);
+        Assert.Equal(1, old.Find(@"C:\old.txt")!.OpenCount, "旧版の history.json（回数なし）は 1 回");
+        Assert.Equal(4, old.Find(@"C:\dup.txt")!.OpenCount, "重複は多い方");
+    }
+
+    [Test]
     public void Register_SkipsExcludedAndExpired()
     {
         var store = NewStore();
@@ -73,6 +122,59 @@ public sealed class HistoryStoreTests
         var reloaded = NewStore();
         reloaded.Load(store.ToHistoryRecords(), store.ToDeletedRecords());
         Assert.False(reloaded.Register(@"C:\a.txt", lnkTime, Now), "保存・読み込み後も復活しない（秒未満を失わない）");
+    }
+
+    [Test]
+    public void Restore_BringsBackDeletedEntryAsItWas()
+    {
+        var store = NewStore();
+        var lastUsed = Now.AddHours(-1).AddTicks(7);
+        store.Register(@"C:\a.txt", lastUsed.AddHours(-1), Now);
+        store.Register(@"C:\a.txt", lastUsed, Now);
+        store.Find(@"C:\a.txt")!.IsKept = true;
+        store.Remove(store.Entries.ToList(), Now);
+
+        // 保存・読み込みを挟んでも、削除前の状態を覚えている
+        var reloaded = NewStore();
+        reloaded.Load(store.ToHistoryRecords(), store.ToDeletedRecords());
+        Assert.Equal(1, reloaded.Restore(new[] { @"c:\A.TXT" }), "一覧に戻した件数");
+
+        var entry = Assert.NotNull(reloaded.Find(@"C:\a.txt"));
+        Assert.Equal(lastUsed, entry.LastUsed, "前回利用日時は削除前のまま");
+        Assert.Equal(2, entry.OpenCount, "回数も削除前のまま");
+        Assert.True(entry.IsKept, "キープも削除前のまま");
+        Assert.False(reloaded.Deleted.ContainsKey(@"C:\a.txt"), "削除の記憶は消える");
+        Assert.False(reloaded.Register(@"C:\a.txt", lastUsed, Now), "同じ .lnk の再走査で回数を二重に数えない");
+    }
+
+    [Test]
+    public void Restore_OldDeletedRecordWithoutSnapshot_ForgetsSoNextScanBringsItBack()
+    {
+        // 旧版で消した記録（パスと削除日時だけ）
+        var store = NewStore();
+        store.Load(null, new[] { new Models.DeletedRecord { Path = @"C:\old.txt", DeletedAt = DateFormat.ToStorage(Now) } });
+        var lnkTime = Now.AddDays(-1);
+        Assert.False(store.Register(@"C:\old.txt", lnkTime, Now), "前提: 消した記憶があるので戻らない");
+
+        Assert.Equal(0, store.Restore(new[] { @"C:\old.txt" }), "削除前の状態が分からないので、すぐには一覧に戻さない");
+        Assert.False(store.Deleted.ContainsKey(@"C:\old.txt"), "記憶は消す");
+        Assert.True(store.Register(@"C:\old.txt", lnkTime, Now), "次の走査で .lnk から一覧に戻る");
+    }
+
+    [Test]
+    public void Clear_RemovesHistoryKeepAndDeleted()
+    {
+        var store = NewStore();
+        store.Register(@"C:\a.txt", Now.AddHours(-2), Now);
+        store.Register(@"C:\b.txt", Now.AddHours(-1), Now);
+        store.Find(@"C:\a.txt")!.IsKept = true;
+        store.Remove(new[] { store.Find(@"C:\b.txt")! }, Now);
+
+        store.Clear();
+        Assert.Equal(0, store.Entries.Count, "履歴（キープを含む）を消す");
+        Assert.Equal(0, store.Deleted.Count, "削除した履歴の記憶も消す");
+        Assert.True(store.Register(@"C:\b.txt", Now.AddHours(-1), Now), "削除の記憶が無いので、読み直せば一覧に戻る");
+        Assert.False(store.Find(@"C:\b.txt")!.IsKept);
     }
 
     [Test]

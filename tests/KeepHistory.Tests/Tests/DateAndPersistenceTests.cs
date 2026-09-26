@@ -1,6 +1,7 @@
 using System;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using KeepHistory.Models;
 using KeepHistory.Services;
@@ -13,6 +14,7 @@ public sealed class DateAndPersistenceTests : IDisposable
     private readonly CultureInfo _originalCulture = CultureInfo.CurrentCulture;
     private readonly CultureInfo _originalUiCulture = CultureInfo.CurrentUICulture;
     private readonly TempDirectory _dir = new("persistence");
+    private readonly string? _originalLogDirectory = ErrorLog.DirectoryOverride;
 
     public DateAndPersistenceTests()
     {
@@ -23,7 +25,7 @@ public sealed class DateAndPersistenceTests : IDisposable
     {
         CultureInfo.CurrentCulture = _originalCulture;
         CultureInfo.CurrentUICulture = _originalUiCulture;
-        ErrorLog.DirectoryOverride = null;
+        ErrorLog.DirectoryOverride = _originalLogDirectory;
         _dir.Dispose();
     }
 
@@ -90,12 +92,54 @@ public sealed class DateAndPersistenceTests : IDisposable
         Assert.Equal(365, defaults.RetentionDays, "保持日数の既定は 365 日");
         Assert.True(defaults.ExcludePatterns.Contains("~$*"));
         Assert.True(defaults.Hotkey.Enabled);
+        Assert.False(defaults.StayResident, "常駐は既定でしない");
 
         File.WriteAllText(data.SettingsPath, "{ \"RetentionDays\": 0, \"WindowWidth\": 10, \"ExcludePatterns\": null }");
         var clamped = data.LoadSettings();
-        Assert.Equal(1, clamped.RetentionDays);
+        Assert.Equal(30, clamped.RetentionDays, "0 日は最短の 1か月に寄せる");
         Assert.Equal(960.0, clamped.WindowWidth);
         Assert.NotNull(clamped.ExcludePatterns);
+
+        File.WriteAllText(data.SettingsPath, "{ \"RetentionDays\": 400 }");
+        Assert.Equal(365, data.LoadSettings().RetentionDays, "保持日数の上限は 365 日（手で書き換えた設定も丸める）");
+    }
+
+    [Test]
+    public void RetentionChoices_AreOneThreeSixMonthsAndOneYear()
+    {
+        Assert.SequenceEqual(new[] { "1か月", "3か月", "6か月", "1年" }, AppSettings.RetentionChoices.Select(c => c.Label));
+        Assert.SequenceEqual(new[] { 30, 90, 180, 365 }, AppSettings.RetentionChoices.Select(c => c.Value));
+        Assert.Equal(365, new AppSettings().RetentionDays, "既定は 1年");
+    }
+
+    [Test]
+    public void RetentionDays_NotInChoicesAreSnappedToTheNextLongerChoice()
+    {
+        // 旧版の設定（任意の日数）を読んでも、履歴を消しすぎないよう長い方に寄せる
+        Assert.Equal(30, AppSettings.SnapRetentionDays(1));
+        Assert.Equal(30, AppSettings.SnapRetentionDays(30));
+        Assert.Equal(90, AppSettings.SnapRetentionDays(31));
+        Assert.Equal(180, AppSettings.SnapRetentionDays(100));
+        Assert.Equal(365, AppSettings.SnapRetentionDays(181));
+        Assert.Equal(365, AppSettings.SnapRetentionDays(36500));
+    }
+
+    [Test]
+    public void SettingsExists_IsFalseOnFirstRun()
+    {
+        var data = new DataStore(_dir.Path);
+        Assert.False(data.SettingsExists, "settings.json が無ければ初回起動");
+        data.SaveSettings(data.LoadSettings());
+        Assert.True(data.SettingsExists, "一度保存したら初回ではない");
+    }
+
+    [Test]
+    public void StayResident_RoundTrips()
+    {
+        var data = new DataStore(_dir.Path);
+        data.SaveSettings(new AppSettings { StayResident = true });
+        Assert.True(data.LoadSettings().StayResident);
+        Assert.True(new AppSettings { StayResident = true }.Clone().StayResident, "Clone でも引き継ぐ");
     }
 
     [Test]

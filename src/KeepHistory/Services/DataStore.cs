@@ -43,9 +43,28 @@ public sealed class DataStore
 
     public void SaveDeleted(List<DeletedRecord> records) => Save(DeletedPath, records);
 
+    /// <summary>settings.json があるか（無ければ初回起動）。</summary>
+    public bool SettingsExists => File.Exists(SettingsPath);
+
     public AppSettings LoadSettings() => (Load<AppSettings>(SettingsPath) ?? new AppSettings()).Normalize();
 
     public void SaveSettings(AppSettings settings) => Save(SettingsPath, settings);
+
+    /// <summary>history.json と deleted.json を削除する（書きかけの一時ファイルも）。</summary>
+    public void DeleteHistory()
+    {
+        File.Delete(HistoryPath);
+        File.Delete(HistoryPath + ".tmp");
+        File.Delete(DeletedPath);
+        File.Delete(DeletedPath + ".tmp");
+    }
+
+    /// <summary>settings.json を削除する（書きかけの一時ファイルも）。履歴のファイルには触れない。</summary>
+    public void DeleteSettings()
+    {
+        File.Delete(SettingsPath);
+        File.Delete(SettingsPath + ".tmp");
+    }
 
     private static T? Load<T>(string path) where T : class
     {

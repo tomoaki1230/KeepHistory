@@ -1,0 +1,34 @@
+<Window x:Class="KeepHistory.Views.FirstRunWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="KeepHistory へようこそ"
+        Width="480" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterScreen" ShowInTaskbar="True" Topmost="True"
+        Background="{StaticResource WindowBackgroundBrush}"
+        FocusManager.FocusedElement="{Binding ElementName=StayResidentButton}">
+    <StackPanel Margin="24,20,24,16">
+        <TextBlock Text="通知領域に常駐しますか？" FontSize="16" FontWeight="SemiBold" Style="{StaticResource BaseTextStyle}" />
+        <TextBlock Margin="0,10,0,6" Style="{StaticResource BaseTextStyle}" TextWrapping="Wrap"
+                   Text="常駐すると、画面を閉じても KeepHistory が通知領域に残り、次のようなメリットがあります。" />
+        <ItemsControl x:Name="BenefitList" Margin="8,0,0,0">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <BulletDecorator Margin="0,3,0,0">
+                        <BulletDecorator.Bullet>
+                            <TextBlock Text="✓" Foreground="{StaticResource SuccessBrush}" Margin="0,0,8,0" />
+                        </BulletDecorator.Bullet>
+                        <TextBlock Text="{Binding}" TextWrapping="Wrap" Style="{StaticResource BaseTextStyle}" />
+                    </BulletDecorator>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <TextBlock Margin="0,12,0,0" Style="{StaticResource SubTextStyle}"
+                   Text="常駐しない場合は、画面を閉じるとアプリを終了します。この設定は、あとから「ツール ＞ 設定」でいつでも変更できます。" />
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+            <Button x:Name="StayResidentButton" Content="常駐する" IsDefault="True"
+                    Style="{StaticResource DialogButtonStyle}" Click="OnStayResidentClick" />
+            <Button x:Name="NotResidentButton" Content="常駐しない" IsCancel="True"
+                    Style="{StaticResource DialogButtonStyle}" Click="OnNotResidentClick" />
+        </StackPanel>
+    </StackPanel>
+</Window>

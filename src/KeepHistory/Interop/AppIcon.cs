@@ -1,59 +1,49 @@
 using System;
-using System.Runtime.InteropServices;
+using System.IO;
 using System.Windows;
-using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Drawing = System.Drawing;
-using Drawing2D = System.Drawing.Drawing2D;
+using Forms = System.Windows.Forms;
 
 namespace KeepHistory.Interop;
 
-/// <summary>アイコンを実行時に描く（リソースファイルを持たないため）。</summary>
+/// <summary>
+/// アプリのアイコン（Assets/KeepHistory.ico）。
+/// 元画像は Assets/icon.png。変更したら tools/make-icon.ps1 で .ico を作り直す。
+/// </summary>
 public static class AppIcon
 {
-    private static Drawing.Icon? _icon;
+    public const string ResourceUri = "pack://application:,,,/KeepHistory;component/Assets/KeepHistory.ico";
 
+    private static Drawing.Icon? _trayIcon;
+    private static ImageSource? _imageSource;
+
+    /// <summary>通知領域用（画面の拡大率に合った小アイコンのサイズで読む）。</summary>
     public static Drawing.Icon GetIcon()
+        => _trayIcon ??= LoadIcon(Forms.SystemInformation.SmallIconSize);
+
+    /// <summary>指定サイズに最も近いアイコンを読む。</summary>
+    public static Drawing.Icon LoadIcon(Drawing.Size size)
     {
-        if (_icon != null) return _icon;
-        using var bitmap = new Drawing.Bitmap(32, 32);
-        using (var g = Drawing.Graphics.FromImage(bitmap))
-        {
-            g.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias;
-            g.TextRenderingHint = Drawing.Text.TextRenderingHint.AntiAliasGridFit;
-            using var path = new Drawing2D.GraphicsPath();
-            const int r = 8;
-            path.AddArc(1, 1, r * 2, r * 2, 180, 90);
-            path.AddArc(30 - r * 2, 1, r * 2, r * 2, 270, 90);
-            path.AddArc(30 - r * 2, 30 - r * 2, r * 2, r * 2, 0, 90);
-            path.AddArc(1, 30 - r * 2, r * 2, r * 2, 90, 90);
-            path.CloseFigure();
-            using var fill = new Drawing.SolidBrush(Drawing.Color.FromArgb(0x25, 0x63, 0xEB));
-            g.FillPath(fill, path);
-            using var font = new Drawing.Font("Segoe UI", 17, Drawing.FontStyle.Bold, Drawing.GraphicsUnit.Pixel);
-            using var format = new Drawing.StringFormat { Alignment = Drawing.StringAlignment.Center, LineAlignment = Drawing.StringAlignment.Center };
-            g.DrawString("H", font, Drawing.Brushes.White, new Drawing.RectangleF(0, 1, 32, 32), format);
-        }
-        var handle = bitmap.GetHicon();
-        try
-        {
-            _icon = (Drawing.Icon)Drawing.Icon.FromHandle(handle).Clone();
-        }
-        finally
-        {
-            DestroyIcon(handle);
-        }
-        return _icon;
+        using var stream = OpenStream();
+        return new Drawing.Icon(stream, size);
     }
 
+    /// <summary>ウインドウ用（タイトルバー・タスクバー）。</summary>
     public static ImageSource GetImageSource()
     {
-        var source = Imaging.CreateBitmapSourceFromHIcon(GetIcon().Handle, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
-        source.Freeze();
-        return source;
+        if (_imageSource != null) return _imageSource;
+        var decoder = BitmapDecoder.Create(new Uri(ResourceUri), BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
+        var frame = decoder.Frames[0];
+        frame.Freeze();
+        return _imageSource = frame;
     }
 
-    [DllImport("user32.dll")]
-    private static extern bool DestroyIcon(IntPtr handle);
+    public static Stream OpenStream()
+    {
+        var info = Application.GetResourceStream(new Uri(ResourceUri))
+                   ?? throw new InvalidOperationException("アイコンのリソースが見つかりません: " + ResourceUri);
+        return info.Stream;
+    }
 }

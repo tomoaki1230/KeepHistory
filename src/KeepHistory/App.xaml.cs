@@ -35,7 +35,7 @@ public partial class App : Application
 
         var startHidden = e.Args.Any(a => string.Equals(a, "--tray", StringComparison.OrdinalIgnoreCase)
                                           || string.Equals(a, "/tray", StringComparison.OrdinalIgnoreCase));
-        _controller.Start(showWindow: !startHidden);
+        _controller.Start(startHidden);
     }
 
     protected override void OnSessionEnding(SessionEndingCancelEventArgs e)

@@ -8,6 +8,21 @@
         FocusManager.FocusedElement="{Binding ElementName=SearchBox}"
         PreviewKeyDown="OnWindowPreviewKeyDown">
 
+    <DockPanel>
+    <!-- メニューバー -->
+    <Menu x:Name="MainMenu" DockPanel.Dock="Top" Background="{StaticResource SurfaceBrush}"
+          BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="4,2">
+        <MenuItem x:Name="ToolsMenu" Header="ツール(_T)">
+            <MenuItem x:Name="SettingsMenuItem" Header="設定(_O)..." Click="OnSettingsClick" />
+        </MenuItem>
+        <MenuItem x:Name="HelpMenu" Header="ヘルプ(_H)">
+            <MenuItem x:Name="ThirdPartyLicensesMenuItem" Header="サードパーティーのライセンス(_L)"
+                      Click="OnThirdPartyLicensesClick" />
+            <Separator />
+            <MenuItem x:Name="AboutMenuItem" Header="バージョン情報(_A)" Click="OnAboutClick" />
+        </MenuItem>
+    </Menu>
+
     <Grid Margin="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -17,10 +32,13 @@
 
         <!-- 検索と絞り込み（タブは使わない） -->
         <DockPanel Grid.Row="0" Margin="0,0,0,10" LastChildFill="True">
-            <Button x:Name="SettingsButton" DockPanel.Dock="Right" Content="⚙ 設定"
-                    Style="{StaticResource ToolbarButtonStyle}" Click="OnSettingsClick" />
-            <ToggleButton x:Name="KeptOnlyToggle" DockPanel.Dock="Right" Content="★ キープのみ"
-                          IsChecked="{Binding KeptOnly}" Style="{StaticResource ToolbarButtonStyle}" />
+            <ToggleButton x:Name="KeptOnlyToggle" DockPanel.Dock="Right"
+                          IsChecked="{Binding KeptOnly}" Style="{StaticResource ToolbarButtonStyle}">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock x:Name="KeptOnlyStar" Style="{StaticResource KeptOnlyStarStyle}" />
+                    <TextBlock Text="キープのみ" VerticalAlignment="Center" />
+                </StackPanel>
+            </ToggleButton>
             <ComboBox x:Name="PeriodBox" DockPanel.Dock="Right" Width="120"
                       ItemsSource="{Binding PeriodChoices}" SelectedItem="{Binding SelectedPeriod}"
                       DisplayMemberPath="Label" Style="{StaticResource ToolbarComboStyle}" />
@@ -50,18 +68,24 @@
         <DataGrid x:Name="HistoryGrid" Grid.Row="1"
                   Style="{StaticResource HistoryGridStyle}"
                   RowStyle="{StaticResource HistoryRowStyle}"
+                  CellStyle="{StaticResource HistoryCellStyle}"
                   ItemsSource="{Binding View}"
                   AutoGenerateColumns="False" IsReadOnly="True"
-                  SelectionMode="Extended" SelectionUnit="FullRow"
+                  SelectionMode="Single" SelectionUnit="FullRow"
                   CanUserSortColumns="True" CanUserReorderColumns="True" CanUserResizeColumns="True"
                   EnableRowVirtualization="True"
                   MouseDoubleClick="OnGridMouseDoubleClick"
-                  PreviewKeyDown="OnGridPreviewKeyDown">
+                  PreviewMouseLeftButtonDown="OnGridPreviewMouseLeftButtonDown"
+                  PreviewMouseMove="OnGridPreviewMouseMove"
+                  PreviewMouseLeftButtonUp="OnGridPreviewMouseLeftButtonUp"
+                  PreviewKeyDown="OnGridPreviewKeyDown"
+                  SelectionChanged="OnGridSelectionChanged">
             <DataGrid.ContextMenu>
                 <ContextMenu>
                     <MenuItem Header="開く" InputGestureText="Enter" FontWeight="Bold" Click="OnOpenClick" />
                     <MenuItem Header="フォルダを開く" Click="OnOpenFolderClick" />
                     <MenuItem Header="パスをコピー" InputGestureText="Ctrl+C" Click="OnCopyPathClick" />
+                    <MenuItem x:Name="CopyFileNameMenuItem" Header="ファイル名をコピー" Click="OnCopyFileNameClick" />
                     <Separator />
                     <MenuItem Header="★ キープの切り替え" InputGestureText="Ctrl+K" Click="OnToggleKeepClick" />
                     <Separator />
@@ -69,7 +93,7 @@
                 </ContextMenu>
             </DataGrid.ContextMenu>
             <DataGrid.Columns>
-                <DataGridTemplateColumn Header="★" SortMemberPath="IsKept" Width="40" CanUserResize="False"
+                <DataGridTemplateColumn Header="キープ" SortMemberPath="IsKept" Width="40" CanUserResize="False"
                                         HeaderStyle="{StaticResource KeepColumnHeaderStyle}">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
@@ -79,19 +103,24 @@
                 </DataGridTemplateColumn>
                 <DataGridTextColumn Header="ファイル名" Binding="{Binding FileName}" SortMemberPath="FileName"
                                     Width="260" ElementStyle="{StaticResource CellTextStyle}" />
-                <DataGridTextColumn Header="種類" Binding="{Binding Extension}" SortMemberPath="Extension"
-                                    Width="70" ElementStyle="{StaticResource CellTextStyle}" />
                 <DataGridTextColumn Header="フォルダ" Binding="{Binding FolderPath}" SortMemberPath="FolderPath"
                                     Width="380" ElementStyle="{StaticResource CellTextStyle}" />
                 <DataGridTextColumn Header="前回利用日時" Binding="{Binding LastUsedText}" SortMemberPath="LastUsed"
                                     Width="140" ElementStyle="{StaticResource CellTextStyle}" />
+                <DataGridTextColumn Header="回数" Binding="{Binding OpenCount}" SortMemberPath="OpenCount"
+                                    Width="60" ElementStyle="{StaticResource CellNumberStyle}" />
             </DataGrid.Columns>
         </DataGrid>
 
         <DockPanel Grid.Row="2" Margin="0,8,0,0">
             <TextBlock DockPanel.Dock="Right" Style="{StaticResource SubTextStyle}"
                        Text="Enter: 開く　Ctrl+K: キープ　Delete: 履歴から削除　Esc: 閉じる" />
-            <TextBlock x:Name="StatusText" Style="{StaticResource SubTextStyle}" Text="{Binding StatusText}" />
+            <TextBlock x:Name="StatusText" DockPanel.Dock="Left" Style="{StaticResource SubTextStyle}" Text="{Binding StatusText}" />
+            <!-- 開こうとしたファイルが見つからないときなどのメッセージ（赤字）。ダイアログを出さずキーボード操作を続けられるように -->
+            <TextBlock x:Name="StatusMessageText" Margin="16,0,12,0" FontSize="11.5"
+                       Foreground="{StaticResource ErrorBrush}" TextTrimming="CharacterEllipsis"
+                       ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" Visibility="Collapsed" />
         </DockPanel>
     </Grid>
+    </DockPanel>
 </Window>

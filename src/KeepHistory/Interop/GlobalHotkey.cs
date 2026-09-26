@@ -21,6 +21,7 @@ public sealed class GlobalHotkey : IHotkeyService, IDisposable
 {
     private const int WmHotkey = 0x0312;
     private const int HotkeyId = 0x4B48;
+    private const int ProbeId = 0x4B49;
     private static readonly IntPtr HwndMessage = new(-3);
 
     private readonly HwndSource _source;
@@ -46,10 +47,30 @@ public sealed class GlobalHotkey : IHotkeyService, IDisposable
     {
         Unregister();
         if (!setting.Enabled) return true;
-        if (!Enum.TryParse<Key>(setting.Key, ignoreCase: true, out var key) || key == Key.None) return false;
-        var vk = (uint)KeyInterop.VirtualKeyFromKey(key);
+        if (!TryGetVirtualKey(setting, out var vk)) return false;
         IsRegistered = RegisterHotKey(_source.Handle, HotkeyId, setting.ToNativeModifiers(), vk);
         return IsRegistered;
+    }
+
+    /// <summary>設定のキー名を仮想キーコードにする。</summary>
+    internal static bool TryGetVirtualKey(HotkeySetting setting, out uint vk)
+    {
+        vk = 0;
+        if (!Enum.TryParse<Key>(setting.Key, ignoreCase: true, out var key) || key == Key.None) return false;
+        vk = (uint)KeyInterop.VirtualKeyFromKey(key);
+        return vk != 0;
+    }
+
+    /// <summary>
+    /// その組み合わせをいま登録できるか（ほかのアプリや Windows が使っていないか）を確かめる。
+    /// 一時的に登録してすぐ解除する。KeepHistory 自身の登録は、設定画面を開いている間は解除済み。
+    /// </summary>
+    public static bool IsAvailable(HotkeySetting setting)
+    {
+        if (!TryGetVirtualKey(setting, out var vk)) return false;
+        if (!RegisterHotKey(IntPtr.Zero, ProbeId, setting.ToNativeModifiers(), vk)) return false;
+        UnregisterHotKey(IntPtr.Zero, ProbeId);
+        return true;
     }
 
     public void Unregister()

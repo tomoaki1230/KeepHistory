@@ -14,7 +14,19 @@
     <AssemblyName>KeepHistory</AssemblyName>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <Version>1.0.0</Version>
+    <!-- 作成者（バージョン情報に表示する。アセンブリの Company 属性になる） -->
+    <Authors>Tomoaki Bessho</Authors>
+    <Company>Tomoaki Bessho</Company>
+    <!-- exe のアイコン（エクスプローラー・スタートメニューなど） -->
+    <ApplicationIcon>Assets\KeepHistory.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- ウインドウと通知領域のアイコン。元画像 icon.png から tools/make-icon.ps1 で生成する -->
+    <Resource Include="Assets\KeepHistory.ico" />
+    <!-- ヘルプ ＞ サードパーティーのライセンス で表示する -->
+    <Resource Include="Licenses\THIRD-PARTY-NOTICES.txt" />
+  </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="KeepHistory.Tests" />

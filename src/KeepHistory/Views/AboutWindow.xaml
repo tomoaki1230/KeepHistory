@@ -1,0 +1,27 @@
+<Window x:Class="KeepHistory.Views.AboutWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="バージョン情報"
+        SizeToContent="WidthAndHeight" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{StaticResource WindowBackgroundBrush}"
+        FocusManager.FocusedElement="{Binding ElementName=CloseButton}">
+    <StackPanel Margin="24,20,24,16" MinWidth="320">
+        <StackPanel Orientation="Horizontal">
+            <Image x:Name="AppImage" Width="64" Height="64" VerticalAlignment="Top" />
+            <StackPanel Margin="16,4,0,0" VerticalAlignment="Center">
+                <TextBlock x:Name="ProductText" Text="KeepHistory" FontSize="20" FontWeight="SemiBold"
+                           Style="{StaticResource BaseTextStyle}" />
+                <TextBlock x:Name="VersionText" Margin="0,6,0,0" Style="{StaticResource BaseTextStyle}" />
+                <TextBlock x:Name="AuthorText" Margin="0,2,0,0" Style="{StaticResource BaseTextStyle}" />
+                <TextBlock x:Name="RuntimeText" Margin="0,2,0,0" Style="{StaticResource SubTextStyle}" />
+            </StackPanel>
+        </StackPanel>
+        <TextBlock Margin="0,16,0,0" Style="{StaticResource SubTextStyle}"
+                   Text="最近使ったファイルを一覧・検索するアプリです。" />
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+            <Button x:Name="CloseButton" Content="閉じる" IsDefault="True" IsCancel="True"
+                    Style="{StaticResource DialogButtonStyle}" />
+        </StackPanel>
+    </StackPanel>
+</Window>

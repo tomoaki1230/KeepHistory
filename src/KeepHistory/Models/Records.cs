@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using KeepHistory.Services;
 
 namespace KeepHistory.Models;
 
@@ -10,6 +12,9 @@ public sealed class HistoryRecord
     public string Path { get; set; } = string.Empty;
     public string LastUsed { get; set; } = string.Empty;
     public bool IsKept { get; set; }
+
+    /// <summary>開いた回数。旧版の history.json には無いので、読み込み時に 1 以上にそろえる。</summary>
+    public int OpenCount { get; set; }
 }
 
 /// <summary>deleted.json の 1 件。この日時以前の利用記録（.lnk）は再登録しない。</summary>
@@ -17,6 +22,19 @@ public sealed class DeletedRecord
 {
     public string Path { get; set; } = string.Empty;
     public string DeletedAt { get; set; } = string.Empty;
+
+    // 以下は「元に戻す」ための削除前の状態。旧版の deleted.json には無い（LastUsed が空）。
+    public string? LastUsed { get; set; }
+    public int OpenCount { get; set; }
+    public bool IsKept { get; set; }
+}
+
+/// <summary>消した履歴の記憶（メモリ上）。LastUsed が null なら削除前の状態が分からない（旧版で消した）。</summary>
+public sealed record DeletedHistory(string Path, DateTime DeletedAt, DateTime? LastUsed, int OpenCount, bool IsKept)
+{
+    public string FileName => System.IO.Path.GetFileName(Path);
+    public string FolderPath => System.IO.Path.GetDirectoryName(Path) ?? string.Empty;
+    public string DeletedAtText => DateFormat.ToDisplay(DeletedAt);
 }
 
 /// <summary>一覧の列レイアウト。</summary>
