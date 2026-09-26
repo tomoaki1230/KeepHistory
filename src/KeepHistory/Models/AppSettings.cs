@@ -50,6 +50,9 @@ public sealed class AppSettings
         Hotkey ??= new HotkeySetting();
         if (string.IsNullOrWhiteSpace(Hotkey.Key)) Hotkey.Key = "H";
         Columns ??= new List<ColumnLayout>();
+        // 手で書き換えた・壊れた settings.json の配列の null 要素は捨てる（残すと起動時に落ちる）
+        ExcludePatterns.RemoveAll(p => p == null);
+        Columns.RemoveAll(c => c == null || c.Id == null);
         if (double.IsNaN(WindowWidth) || WindowWidth < 300) WindowWidth = 960;
         if (double.IsNaN(WindowHeight) || WindowHeight < 200) WindowHeight = 600;
         return this;

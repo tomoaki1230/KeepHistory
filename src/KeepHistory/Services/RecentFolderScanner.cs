@@ -65,16 +65,13 @@ public sealed class RecentFolderScanner
             var lastUsed = File.GetLastWriteTime(lnkPath);
             return new RecentItem(target.Path, lastUsed);
         }
-        catch (IOException)
+        catch (Exception ex)
         {
-            return null;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return null;
-        }
-        catch (COMException)
-        {
+            // 壊れた・想定外の .lnk が 1 件あっても、ほかの .lnk の読み込みを止めない
+            if (ex is not (IOException or UnauthorizedAccessException or COMException))
+            {
+                ErrorLog.Write($"最近使った項目を読めませんでした: {lnkPath}", ex);
+            }
             return null;
         }
     }

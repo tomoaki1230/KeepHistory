@@ -50,6 +50,28 @@ public sealed class RecentFolderTests : IDisposable
         Assert.Equal(time, items[0].LastUsed, ".lnk の最終更新日時が前回利用日時");
     }
 
+    private sealed class ThrowingResolver : IShortcutResolver
+    {
+        public ShortcutTarget? Resolve(string lnkPath)
+            => Path.GetFileName(lnkPath) == "bad.lnk"
+                ? throw new InvalidOperationException("想定外の例外")
+                : new ShortcutTarget(@"C:\ok\" + Path.GetFileNameWithoutExtension(lnkPath), false);
+    }
+
+    [Test]
+    public void ScanAll_OneBrokenLink_DoesNotStopTheOthers()
+    {
+        var time = new DateTime(2026, 9, 20, 9, 15, 0);
+        CreateLink("a.lnk", time);
+        CreateLink("bad.lnk", time);
+        CreateLink("z.lnk", time);
+
+        var items = new RecentFolderScanner(_dir.Path, new ThrowingResolver()).ScanAll();
+
+        Assert.SequenceEqual(new[] { @"C:\ok\a", @"C:\ok\z" }, items.Select(i => i.TargetPath).OrderBy(p => p),
+            "想定外のエラーを起こす .lnk は読み飛ばし、ほかは読み込む");
+    }
+
     [Test]
     public void ScanAll_MissingFolderReturnsEmpty()
     {

@@ -125,6 +125,25 @@ public sealed class DateAndPersistenceTests : IDisposable
     }
 
     [Test]
+    public void Settings_NullElementsAreRemoved_SoStartupDoesNotCrash()
+    {
+        // 手で書き換えた・壊れた settings.json（配列に null）でも起動時に落ちない
+        var data = new DataStore(_dir.Path);
+        File.WriteAllText(data.SettingsPath,
+            "{ \"Columns\": [ null, { \"Id\": \"FileName\", \"Width\": 300, \"DisplayIndex\": 0 } ], \"ExcludePatterns\": [ null, \"*.tmp\" ] }");
+        var settings = data.LoadSettings();
+        Assert.Equal(1, settings.Columns.Count, "null の列設定は捨てる");
+        Assert.SequenceEqual(new[] { "*.tmp" }, settings.ExcludePatterns, "null の除外パターンは捨てる");
+
+        UiTestHost.EnsureApplication();
+        var window = new Views.MainWindow(new ViewModels.MainViewModel(new HistoryStore(), () => DateTime.Now));
+        window.ApplyLayout(settings);
+        new Views.SettingsWindow(settings, _ => true).Close();
+        Assert.Equal(300.0, window.FindColumn("FileName")!.Width.Value, "残りの列設定は反映する");
+        window.Close();
+    }
+
+    [Test]
     public void SettingsExists_IsFalseOnFirstRun()
     {
         var data = new DataStore(_dir.Path);

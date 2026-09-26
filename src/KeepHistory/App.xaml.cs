@@ -35,7 +35,19 @@ public partial class App : Application
 
         var startHidden = e.Args.Any(a => string.Equals(a, "--tray", StringComparison.OrdinalIgnoreCase)
                                           || string.Equals(a, "/tray", StringComparison.OrdinalIgnoreCase));
-        _controller.Start(startHidden);
+        try
+        {
+            _controller.Start(startHidden);
+        }
+        catch (Exception ex)
+        {
+            // 起動の途中で失敗したら、画面もアイコンも無いまま残らないよう終了する
+            // （残ると多重起動ガードを握ったままになり、起動し直しても何も表示されなくなる）
+            ErrorLog.Write("起動できませんでした。", ex);
+            MessageBox.Show($"KeepHistory を起動できませんでした。\n\n{ex.Message}\n\n詳細は error.log を確認してください。",
+                "KeepHistory", MessageBoxButton.OK, MessageBoxImage.Error);
+            Shutdown(1);
+        }
     }
 
     protected override void OnSessionEnding(SessionEndingCancelEventArgs e)

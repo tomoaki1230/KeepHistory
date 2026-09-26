@@ -224,6 +224,72 @@ public sealed class SettingsWindowTests : IDisposable
     }
 
     [Test]
+    public void Ok_WhenHistoryWouldBeRemoved_AsksFirst()
+    {
+        AppSettings? previewed = null;
+        var window = new SettingsWindow(new AppSettings(), _ => true,
+            previewRemoval: s =>
+            {
+                previewed = s;
+                return (3, 2);
+            });
+        try
+        {
+            string? asked = null;
+            window.Confirm = message =>
+            {
+                asked = message;
+                return false;
+            };
+            window.ExcludePatternsBox.Text = "*";
+            Assert.False(window.TryAccept(), "キャンセルなら確定しない（設定画面に残る）");
+            Assert.Null(window.Result);
+            Assert.SequenceEqual(new[] { "*" }, Assert.NotNull(previewed).ExcludePatterns, "入力中の設定で数える");
+            Assert.Contains("5 件", Assert.NotNull(asked), "消える件数を示す");
+            Assert.Contains("除外パターンに当たる履歴: 3 件", asked);
+            Assert.Contains("保持期間を過ぎた履歴: 2 件", asked);
+            Assert.Contains("キープした履歴は残ります", asked);
+
+            window.Confirm = _ => true;
+            Assert.True(window.TryAccept(), "OK なら確定する");
+            Assert.NotNull(window.Result);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [Test]
+    public void Ok_WhenNothingWouldBeRemoved_DoesNotAsk()
+    {
+        var asked = 0;
+        var window = new SettingsWindow(new AppSettings(), _ => true, previewRemoval: _ => (0, 0));
+        try
+        {
+            window.Confirm = _ =>
+            {
+                asked++;
+                return false;
+            };
+            Assert.True(window.TryAccept());
+            Assert.Equal(0, asked, "消える履歴が無ければ確認しない");
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [Test]
+    public void RemovalMessage_OnlyListsNonZeroReasons()
+    {
+        var text = SettingsWindow.BuildRemovalMessage(4, 0);
+        Assert.Contains("4 件", text);
+        Assert.False(text.Contains("保持期間を過ぎた履歴"), "0 件の理由は書かない");
+    }
+
+    [Test]
     public void RejectsInvalidInput()
     {
         _window.RetentionBox.SelectedItem = null;

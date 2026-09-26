@@ -16,21 +16,25 @@ public partial class SettingsWindow : Window
     private readonly Func<HotkeySetting, bool> _isHotkeyAvailable;
     private readonly Action? _openDeletedHistory;
     private readonly Action? _resetAll;
+    private readonly Func<AppSettings, (int Excluded, int Expired)>? _previewRemoval;
     private bool _loading = true;
 
     /// <param name="isHotkeyAvailable">ホットキーが使えるかの確認（既定は実際に登録を試す。テストで差し替える）。</param>
     /// <param name="openDeletedHistory">「削除した履歴を元に戻す」画面を開く処理。null ならボタンを使えなくする。</param>
     /// <param name="resetAll">「すべて初期状態に戻す」を確認で OK したときの処理（設定・履歴の削除）。null ならボタンを使えなくする。</param>
+    /// <param name="previewRemoval">新しい設定で消える履歴の件数（除外・期限切れ）を数える処理。OK の前の確認に使う。</param>
     public SettingsWindow(AppSettings current, Func<HotkeySetting, bool>? isHotkeyAvailable = null,
-        Action? openDeletedHistory = null, Action? resetAll = null)
+        Action? openDeletedHistory = null, Action? resetAll = null,
+        Func<AppSettings, (int Excluded, int Expired)>? previewRemoval = null)
     {
+        _previewRemoval = previewRemoval;
         _isHotkeyAvailable = isHotkeyAvailable ?? GlobalHotkey.IsAvailable;
         _openDeletedHistory = openDeletedHistory;
         _resetAll = resetAll;
         InitializeComponent();
         DeletedHistoryButton.IsEnabled = openDeletedHistory != null;
         ResetAllButton.IsEnabled = resetAll != null;
-        Confirm = message => MessageBox.Show(this, message, "すべて初期状態に戻す",
+        Confirm = message => MessageBox.Show(this, message, "KeepHistory の設定",
             MessageBoxButton.OKCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel) == MessageBoxResult.OK;
         KeyBox.ItemsSource = KeyChoices;
         RetentionBox.ItemsSource = AppSettings.RetentionChoices;
@@ -186,15 +190,42 @@ public partial class SettingsWindow : Window
     private void OnResetExcludePatternsClick(object sender, RoutedEventArgs e)
         => ExcludePatternsBox.Text = string.Join(Environment.NewLine, ExclusionFilter.DefaultPatterns);
 
-    private void OnOkClick(object sender, RoutedEventArgs e)
+    /// <summary>新しい設定で履歴が消えるときの確認文。0 件の理由は書かない。</summary>
+    public static string BuildRemovalMessage(int excluded, int expired)
+    {
+        var lines = new System.Collections.Generic.List<string>();
+        if (excluded > 0) lines.Add($"・除外パターンに当たる履歴: {excluded} 件");
+        if (expired > 0) lines.Add($"・保持期間を過ぎた履歴: {expired} 件");
+        return $"この設定にすると、次の履歴 {excluded + expired} 件を一覧から削除します。\n\n"
+               + string.Join("\n", lines) + "\n\n"
+               + "キープした履歴は残ります。\n"
+               + "設定を元に戻すと、「最近使った項目」に残っている分は一覧に戻りますが、回数は 1 からになります。\n\n"
+               + "よろしいですか？";
+    }
+
+    /// <summary>
+    /// 入力を検証し、履歴が消える場合は確認してから確定する。確定したら Result に入れて true
+    /// （キャンセル・入力エラーなら false で、設定画面に残る）。
+    /// </summary>
+    internal bool TryAccept()
     {
         if (!TryBuildResult(out var result, out var error))
         {
             ErrorText.Text = error;
             ErrorText.Visibility = Visibility.Visible;
-            return;
+            return false;
+        }
+        if (_previewRemoval != null)
+        {
+            var (excluded, expired) = _previewRemoval(result);
+            if (excluded + expired > 0 && !Confirm(BuildRemovalMessage(excluded, expired))) return false;
         }
         Result = result;
-        DialogResult = true;
+        return true;
+    }
+
+    private void OnOkClick(object sender, RoutedEventArgs e)
+    {
+        if (TryAccept()) DialogResult = true;
     }
 }

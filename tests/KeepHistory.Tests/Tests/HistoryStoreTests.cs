@@ -162,6 +162,25 @@ public sealed class HistoryStoreTests
     }
 
     [Test]
+    public void CountRemovals_CountsNonKeptEntriesRemovedByNewSettings()
+    {
+        var store = NewStore();
+        store.Register(@"C:\a.log", Now.AddDays(-1), Now);
+        store.Register(@"C:\old.log", Now.AddDays(-100), Now);
+        store.Register(@"C:\old.txt", Now.AddDays(-100), Now);
+        store.Register(@"C:\kept.log", Now.AddDays(-100), Now);
+        store.Register(@"C:\new.txt", Now.AddDays(-1), Now);
+        store.Find(@"C:\kept.log")!.IsKept = true;
+
+        var (excluded, expired) = store.CountRemovals(new ExclusionFilter(new[] { "*.log" }), 30, Now);
+        Assert.Equal(2, excluded, "除外で消える（キープは数えない）");
+        Assert.Equal(1, expired, "期限切れで消える（除外で数えたものは重ねて数えない）");
+        Assert.Equal(5, store.Entries.Count, "数えるだけで消さない");
+
+        Assert.Equal((0, 0), store.CountRemovals(ExclusionFilter.Empty, 365, Now), "何も消えない設定なら 0");
+    }
+
+    [Test]
     public void Clear_RemovesHistoryKeepAndDeleted()
     {
         var store = NewStore();

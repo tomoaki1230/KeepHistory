@@ -6,7 +6,8 @@
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource WindowBackgroundBrush}"
         FocusManager.FocusedElement="{Binding ElementName=SearchBox}"
-        PreviewKeyDown="OnWindowPreviewKeyDown">
+        PreviewKeyDown="OnWindowPreviewKeyDown"
+        KeyDown="OnWindowKeyDown">
 
     <DockPanel>
     <!-- メニューバー -->

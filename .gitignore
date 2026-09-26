@@ -6,3 +6,4 @@ temp/*
 !temp/.gitkeep
 backup/*
 !backup/.gitkeep
+release/

@@ -118,8 +118,10 @@ public partial class MainWindow : Window
     /// <summary>保存された列レイアウトとウインドウサイズを反映する。</summary>
     public void ApplyLayout(AppSettings settings)
     {
-        Width = Math.Max(MinWidth, settings.WindowWidth);
-        Height = Math.Max(MinHeight, settings.WindowHeight);
+        // 大きいモニターで保存したサイズでも、今の画面の作業領域からはみ出さない
+        var work = SystemParameters.WorkArea;
+        Width = Math.Max(MinWidth, Math.Min(settings.WindowWidth, work.Width));
+        Height = Math.Max(MinHeight, Math.Min(settings.WindowHeight, work.Height));
 
         var columns = HistoryGrid.Columns;
         var saved = settings.Columns
@@ -354,16 +356,22 @@ public partial class MainWindow : Window
 
     private void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Escape)
-        {
-            e.Handled = true;
-            CloseOrHide();
-        }
-        else if ((e.Key == Key.F || e.Key == Key.L) && Keyboard.Modifiers == ModifierKeys.Control)
+        if ((e.Key == Key.F || e.Key == Key.L) && Keyboard.Modifiers == ModifierKeys.Control)
         {
             e.Handled = true;
             FocusSearchBox();
         }
+    }
+
+    /// <summary>
+    /// Esc で画面を閉じる（常駐するなら隠す）。プルダウンやメニューが開いていれば、そちらが Esc を使う（処理済みになる）ので、
+    /// ここには届かない。先に受ける Preview で処理すると、プルダウンを閉じるつもりの Esc で画面ごと閉じてしまう。
+    /// </summary>
+    private void OnWindowKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape) return;
+        e.Handled = true;
+        CloseOrHide();
     }
 
     private void OnSearchBoxPreviewKeyDown(object sender, KeyEventArgs e)

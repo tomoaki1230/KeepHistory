@@ -120,6 +120,23 @@ public sealed class HistoryStore
         return expired.Count > 0 || staleDeleted.Count > 0;
     }
 
+    /// <summary>
+    /// 設定を変えたときに消える履歴の件数を数える（消さない）。キープした履歴は数えない。
+    /// 除外で消えるものを先に数え、期限切れはそれ以外から数える（重ねて数えない）。
+    /// </summary>
+    public (int Excluded, int Expired) CountRemovals(ExclusionFilter exclusion, int retentionDays, DateTime now)
+    {
+        var limit = now.AddDays(-retentionDays);
+        int excluded = 0, expired = 0;
+        foreach (var entry in _entries.Values)
+        {
+            if (entry.IsKept) continue;
+            if (exclusion.IsExcluded(entry.Path)) excluded++;
+            else if (entry.LastUsed < limit) expired++;
+        }
+        return (excluded, expired);
+    }
+
     /// <summary>除外パターンに当たる履歴を消す（★キープは残す）。消した件数を返す。</summary>
     public int RemoveExcluded()
     {

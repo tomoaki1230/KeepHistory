@@ -1,4 +1,6 @@
-using KeepHistory.Models;
+using System;
+using System.Collections.Generic;
+using System.IO;
 
 namespace KeepHistory.Services;
 
@@ -9,10 +11,35 @@ namespace KeepHistory.Services;
 /// </summary>
 public static class AppDataReset
 {
-    public static void Run(SettingsStorage settings, DataStore data, HistoryStore store)
+    /// <summary>
+    /// すべて消す。ファイルを消せなかったものがあっても残りは続け、消せなかったものの名前を返す（すべて消せたら空）。
+    /// </summary>
+    public static IReadOnlyList<string> Run(SettingsStorage settings, DataStore data, HistoryStore store)
     {
+        var failures = new List<string>();
+
+        // メモリ上の履歴は必ず空にする（ファイルを消せなくても、次の保存で空の状態が書かれる）
         store.Clear();
-        data.DeleteHistory();
-        settings.DeleteAndSuspend();
+        try
+        {
+            data.DeleteHistory();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            ErrorLog.Write("履歴のファイルを削除できませんでした。", ex);
+            failures.Add("履歴（history.json・deleted.json）");
+        }
+
+        try
+        {
+            // 消せたときだけ自動保存を止める（消せなければ、既定値の自動保存で上書きさせる）
+            settings.DeleteAndSuspend();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            ErrorLog.Write("設定ファイルを削除できませんでした。", ex);
+            failures.Add("設定（settings.json）");
+        }
+        return failures;
     }
 }

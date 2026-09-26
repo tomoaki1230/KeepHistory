@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using KeepHistory.Models;
@@ -30,8 +31,9 @@ public sealed class AppDataResetTests : IDisposable
         File.WriteAllText(data.HistoryPath + ".tmp", "書きかけ");
         File.WriteAllText(Path.Combine(_dir.Path, "error.log"), "ログ");
 
-        AppDataReset.Run(settings, data, store);
+        var failures = AppDataReset.Run(settings, data, store);
 
+        Assert.Equal(0, failures.Count, "すべて消せた");
         Assert.False(File.Exists(data.SettingsPath), "settings.json を消す");
         Assert.False(File.Exists(data.HistoryPath), "history.json（履歴・キープ）を消す");
         Assert.False(File.Exists(data.DeletedPath), "deleted.json（削除した履歴）を消す");
@@ -46,6 +48,45 @@ public sealed class AppDataResetTests : IDisposable
         reloaded.Load(data.LoadHistory(), data.LoadDeleted());
         Assert.Equal(0, reloaded.Entries.Count);
         Assert.Equal(0, reloaded.Deleted.Count);
+    }
+
+    [Test]
+    public void Run_WhenHistoryFileIsLocked_ReportsFailure_AndStillResetsTheRest()
+    {
+        var data = new DataStore(_dir.Path);
+        var settings = new SettingsStorage(data);
+        var store = new HistoryStore();
+        store.Register(@"C:\a.txt", Now, Now);
+        settings.SaveConfirmed(new AppSettings());
+        data.SaveHistory(store.ToHistoryRecords());
+
+        IReadOnlyList<string> failures;
+        using (new FileStream(data.HistoryPath, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            failures = AppDataReset.Run(settings, data, store);
+        }
+
+        Assert.SequenceEqual(new[] { "履歴（history.json・deleted.json）" }, failures, "消せなかったものを知らせる");
+        Assert.False(File.Exists(data.SettingsPath), "ほかのものは消す");
+        Assert.Equal(0, store.Entries.Count, "メモリ上の履歴は空にする（次の保存で上書きされる）");
+        Assert.True(settings.IsSuspended);
+    }
+
+    [Test]
+    public void Run_WhenSettingsFileIsLocked_KeepsAutoSaveSoDefaultsAreWritten()
+    {
+        var data = new DataStore(_dir.Path);
+        var settings = new SettingsStorage(data);
+        settings.SaveConfirmed(new AppSettings { StayResident = true });
+
+        IReadOnlyList<string> failures;
+        using (new FileStream(data.SettingsPath, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            failures = AppDataReset.Run(settings, data, new HistoryStore());
+        }
+
+        Assert.SequenceEqual(new[] { "設定（settings.json）" }, failures);
+        Assert.False(settings.IsSuspended, "消せなかった設定は、既定値の自動保存で上書きできるよう止めない");
     }
 
     [Test]

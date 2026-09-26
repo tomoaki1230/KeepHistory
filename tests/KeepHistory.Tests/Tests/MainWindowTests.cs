@@ -713,6 +713,84 @@ public sealed class MainWindowTests : IDisposable
     }
 
     [Test]
+    public void ColumnLayout_WindowLargerThanScreen_IsClampedToWorkArea()
+    {
+        // 大きいモニターで保存したサイズを小さい画面で読んでも、画面からはみ出さない
+        _window.ApplyLayout(new AppSettings { WindowWidth = 20000, WindowHeight = 15000 });
+        var work = SystemParameters.WorkArea;
+        Assert.True(_window.Width <= work.Width, $"幅 {_window.Width} は作業領域 {work.Width} 以下");
+        Assert.True(_window.Height <= work.Height, $"高さ {_window.Height} は作業領域 {work.Height} 以下");
+
+        _window.ApplyLayout(new AppSettings { WindowWidth = 800, WindowHeight = 500 });
+        Assert.Equal(800.0, _window.Width, "収まる大きさはそのまま");
+        Assert.Equal(500.0, _window.Height);
+    }
+
+    /// <summary>実際のキー入力と同じ経路（Preview → 通常のイベント）で、フォーカスのある要素にキーを送る。</summary>
+    private static void PressKey(Key key)
+    {
+        var target = (Visual)Keyboard.FocusedElement;
+        var args = new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(target)!, 0, key)
+        {
+            RoutedEvent = Keyboard.PreviewKeyDownEvent,
+        };
+        InputManager.Current.ProcessInput(args);
+        UiTestHost.DoEvents();
+    }
+
+    [Test]
+    public void Esc_WithDropDownOpen_ClosesOnlyTheDropDown()
+    {
+        ShowWindow();
+        _window.PeriodBox.Focus();
+        _window.PeriodBox.IsDropDownOpen = true;
+        UiTestHost.DoEvents();
+
+        PressKey(Key.Escape);
+
+        Assert.False(_closed, "プルダウンを閉じる Esc で画面を閉じない（常駐しない設定ではアプリが終了してしまう）");
+        Assert.True(_window.IsVisible);
+        Assert.False(_window.PeriodBox.IsDropDownOpen, "プルダウンは閉じる");
+    }
+
+    [Test]
+    public void Esc_WithMenuOpen_ClosesOnlyTheMenu()
+    {
+        ShowWindow();
+        _window.ToolsMenu.Focus();
+        _window.ToolsMenu.IsSubmenuOpen = true;
+        UiTestHost.DoEvents();
+
+        PressKey(Key.Escape);
+
+        Assert.False(_closed, "メニューを閉じる Esc で画面を閉じない");
+        Assert.True(_window.IsVisible);
+    }
+
+    [Test]
+    public void Esc_FromSearchBoxOrGrid_StillClosesWindow()
+    {
+        ShowWindow();
+        _window.SearchBox.Focus();
+        _window.SearchBox.Text = "abc";
+        PressKey(Key.Escape);
+        Assert.True(_closed, "検索ボックスからの Esc は従来どおり閉じる");
+
+        var other = new MainWindow(_vm) { ShowActivated = true };
+        var otherClosed = false;
+        other.Closed += (_, _) => otherClosed = true;
+        other.ShowAndActivate();
+        UiTestHost.DoEvents();
+        other.HistoryGrid.SelectedIndex = 0;
+        other.HistoryGrid.Focus();
+        Keyboard.Focus(other.HistoryGrid);
+        UiTestHost.DoEvents();
+        PressKey(Key.Escape);
+        if (!otherClosed) { other.AllowClose = true; other.Close(); }
+        Assert.True(otherClosed, "一覧からの Esc も閉じる");
+    }
+
+    [Test]
     public void ColumnLayout_BrokenSettingsAreIgnored()
     {
         var settings = new AppSettings

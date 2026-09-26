@@ -138,6 +138,20 @@ public sealed class AppController : IDisposable
         _app.Shutdown();
     }
 
+    /// <summary>
+    /// 通知領域の「終了」。設定画面などが開いていれば先に閉じ、その画面の処理が終わってから終了する
+    /// （開いた画面の途中で終了すると、後片付けの順序が乱れるため）。
+    /// </summary>
+    private void RequestExit()
+    {
+        if (OpenDialogs.CloseAll(_app.Windows, _window))
+        {
+            _app.Dispatcher.BeginInvoke(new Action(Exit), DispatcherPriority.Background);
+            return;
+        }
+        Exit();
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
@@ -194,7 +208,7 @@ public sealed class AppController : IDisposable
             _tray = new TrayIcon(AppIcon.GetIcon());
             _tray.ShowRequested += (_, _) => ShowMainWindow();
             _tray.SettingsRequested += (_, _) => OpenSettings();
-            _tray.ExitRequested += (_, _) => Exit();
+            _tray.ExitRequested += (_, _) => RequestExit();
             UpdateTrayToolTip();
         }
         else if (!_settings.StayResident && _tray != null)
@@ -214,7 +228,13 @@ public sealed class AppController : IDisposable
 
     private void OpenSettings()
     {
-        if (_settingsCoordinator == null || _settingsCoordinator.IsOpen) return;
+        if (_settingsCoordinator == null) return;
+        if (_settingsCoordinator.IsOpen)
+        {
+            // すでに開いている（ほかのウインドウの裏に隠れていることがある）ので、いちばん手前の画面を前面に出す
+            OpenDialogs.FindTopmost(_app.Windows, _window)?.Activate();
+            return;
+        }
         _window?.CaptureLayout(_settings);
         _resetRequested = false;
         var result = _settingsCoordinator.Open(_settings);
@@ -240,6 +260,8 @@ public sealed class AppController : IDisposable
         SaveSettings(confirmed: true);
         if (removed > 0 || purged) SaveHistory();
         _vm?.NotifyStoreChanged();
+        // 除外パターンを外した・保持期間を延ばした場合に、「最近使った項目」に残っている分を一覧に戻す
+        _ = RunFullScanAsync();
 
         UpdateTrayToolTip();
         if (_settings.Hotkey.Enabled && _hotkey?.IsRegistered != true) NotifyHotkeyFailure(interactive: true);
@@ -272,16 +294,17 @@ public sealed class AppController : IDisposable
     /// </summary>
     private void ResetAllData()
     {
-        try
-        {
-            AppDataReset.Run(_settingsStorage, _data, _store);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            ErrorLog.Write("設定・履歴のファイルを削除できませんでした。", ex);
-        }
+        var failures = AppDataReset.Run(_settingsStorage, _data, _store);
         _vm?.NotifyStoreChanged();
         _resetRequested = true;
+        if (failures.Count > 0)
+        {
+            MessageBox.Show(
+                "次のファイルを削除できませんでした（ほかのアプリが使っている可能性があります）。\n\n"
+                + string.Join("\n", failures.Select(f => "・" + f)) + "\n\n"
+                + "画面は初期状態で動き、次に保存するときに初期状態の内容で上書きします。詳細は error.log を確認してください。",
+                "KeepHistory", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     /// <summary>
@@ -307,7 +330,8 @@ public sealed class AppController : IDisposable
         SettingsWindow? dialog = null;
         dialog = new SettingsWindow(current,
             openDeletedHistory: () => OpenDeletedHistory(dialog!),
-            resetAll: ResetAllData)
+            resetAll: ResetAllData,
+            previewRemoval: s => _store.CountRemovals(new ExclusionFilter(s.ExcludePatterns), s.RetentionDays, DateTime.Now))
         { Icon = AppIcon.GetImageSource() };
         if (_window != null && _window.IsVisible)
         {
