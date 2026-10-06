@@ -13,7 +13,7 @@
     <RootNamespace>KeepHistory</RootNamespace>
     <AssemblyName>KeepHistory</AssemblyName>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
-    <Version>1.1.0</Version>
+    <Version>1.1.1</Version>
     <!-- 作成者（バージョン情報に表示する。アセンブリの Company 属性になる） -->
     <Authors>Tomoaki Bessho</Authors>
     <Company>Tomoaki Bessho</Company>

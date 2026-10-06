@@ -258,6 +258,12 @@ public partial class MainWindow : Window
     /// <summary>ダイアログでのメッセージ表示（テストで差し替える）。</summary>
     internal Action<string> ShowMessage { get; set; }
 
+    /// <summary>ネットワーク上のパスか（テストで差し替える）。</summary>
+    internal Func<string, bool> IsNetworkPath { get; set; } = path => new FileExistenceChecker().IsNetworkPath(path);
+
+    // 開いている途中のファイル。ネットワークが切断されていると、失敗が分かるまで数十秒かかるので、重ねて開かない
+    private readonly HashSet<string> _opening = new(StringComparer.OrdinalIgnoreCase);
+
     private void OpenEntry(HistoryEntry? entry)
     {
         if (entry == null) return;
@@ -268,14 +274,55 @@ public partial class MainWindow : Window
             ShowNotFound(entry.Path);
             return;
         }
-        RunShellAction(OpenFile(entry.Path), entry.Path);
+        var path = entry.Path;
+        var progress = OpeningMessagePrefix + path;
+        if (!_opening.Add(path))
+        {
+            ShowProgressMessage(progress);
+            return;
+        }
+        // ネットワーク上のファイルは開くまで時間がかかることがあるので、開いている途中だと分かるようにする
+        if (IsNetworkPath(path)) ShowProgressMessage(progress);
+        Task task;
+        try
+        {
+            task = OpenFile(path);
+        }
+        catch (Exception ex)
+        {
+            task = Task.FromException(ex);
+        }
+        task.ContinueWith(t =>
+        {
+            var ex = t.Exception?.GetBaseException();
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                _opening.Remove(path);
+                if (StatusMessageText.Text == progress) ClearStatusMessage();
+                if (ex != null) ReportOpenFailure(path, ex);
+            }));
+        }, System.Threading.CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     }
 
+    internal const string OpeningMessagePrefix = "開いています: ";
+
     private void ShowNotFound(string path) => ShowStatusMessage("ファイルが見つかりません: " + path);
+
+    private void ShowNetworkUnavailable(string path)
+        => ShowStatusMessage("ネットワーク上の場所に接続できません（一時的に切断されている可能性があります）: " + path);
 
     /// <summary>ステータスバーに赤字でメッセージを出す。</summary>
     internal void ShowStatusMessage(string message)
     {
+        StatusMessageText.SetResourceReference(TextBlock.ForegroundProperty, "ErrorBrush");
+        StatusMessageText.Text = message;
+        StatusMessageText.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>ステータスバーに、途中経過（開いています など）を通常の淡い文字で出す。</summary>
+    private void ShowProgressMessage(string message)
+    {
+        StatusMessageText.SetResourceReference(TextBlock.ForegroundProperty, "SubTextBrush");
         StatusMessageText.Text = message;
         StatusMessageText.Visibility = Visibility.Visible;
     }
@@ -291,6 +338,15 @@ public partial class MainWindow : Window
     /// <summary>起動時に「ファイルが無い」「パスが無い」で失敗したか。</summary>
     private static bool IsNotFound(Exception? ex)
         => ex is System.ComponentModel.Win32Exception { NativeErrorCode: 2 or 3 } or FileNotFoundException or DirectoryNotFoundException;
+
+    /// <summary>
+    /// ネットワーク上の場所に届かなかったか（サーバーや共有が見つからない・切断された・応答がない）。
+    /// 51 リモートのコンピューターが使えない／53 ネットワークパスが見つからない／59 予期しないネットワークエラー／
+    /// 64 ネットワーク名が使えなくなった／67 ネットワーク名が見つからない／121 タイムアウト／1203・1222 ネットワークが無い／
+    /// 1231・1232 ネットワークの場所に届かない
+    /// </summary>
+    internal static bool IsNetworkUnavailable(Exception? ex)
+        => ex is System.ComponentModel.Win32Exception { NativeErrorCode: 51 or 53 or 59 or 64 or 67 or 121 or 1203 or 1222 or 1231 or 1232 };
 
     private void OpenFolder(HistoryEntry? entry)
     {
@@ -317,6 +373,12 @@ public partial class MainWindow : Window
         {
             // 開く直前に消された・移動されたなど。キーボード操作を止めないようステータスバーに出す
             ShowNotFound(path);
+            return;
+        }
+        if (IsNetworkUnavailable(ex))
+        {
+            // ネットワークの一時的な切断など。見つからないときと同じく、キーボード操作を止めないようステータスバーに出す
+            ShowNetworkUnavailable(path);
             return;
         }
         ShowMessage($"開けませんでした。\n\n{path}\n\n{ex?.Message}");

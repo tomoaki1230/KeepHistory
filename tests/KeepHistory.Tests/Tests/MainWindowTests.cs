@@ -394,7 +394,7 @@ public sealed class MainWindowTests : IDisposable
             Assert.Same(_window, about.Owner, "履歴画面の上に出す");
             var version = typeof(MainWindow).Assembly.GetName().Version!;
             Assert.Equal("バージョン " + version.ToString(3), about.VersionText.Text, "アプリのバージョン（csproj の Version）");
-            Assert.Equal("1.1.0", AboutWindow.AppVersion);
+            Assert.Equal("1.1.1", AboutWindow.AppVersion);
             Assert.Equal("KeepHistory", about.ProductText.Text);
             Assert.Equal("作成者: Tomoaki Bessho", about.AuthorText.Text, "作成者を表示");
             Assert.Equal("Tomoaki Bessho", AboutWindow.Author, "csproj の作成者から読む");
@@ -568,6 +568,89 @@ public sealed class MainWindowTests : IDisposable
         UiTestHost.DoEvents();
         Assert.Equal(1, dialogs.Count, "見つからない以外はダイアログで知らせる");
         Assert.Contains("開けませんでした", dialogs[0]);
+    }
+
+    [Test]
+    public void OpenNetworkFile_ShowsProgress_ThenClearsWhenOpened()
+    {
+        ShowWindow();
+        var entry = _store.Find(@"C:\Docs\budget.xlsx")!;
+        SelectAndFocusRow(entry);
+        _window.IsNetworkPath = _ => true;
+        var pending = new TaskCompletionSource();
+        var (dialogs, opened) = RecordDialogsAndOpens(_ => pending.Task);
+
+        _window.HandleGridKey(Key.Enter, ModifierKeys.None);
+        UiTestHost.DoEvents();
+        Assert.Equal(Visibility.Visible, _window.StatusMessageText.Visibility, "開いている途中だと分かるようにする");
+        Assert.Equal(MainWindow.OpeningMessagePrefix + entry.Path, _window.StatusMessageText.Text);
+        Assert.Same(Application.Current.FindResource("SubTextBrush"), _window.StatusMessageText.Foreground, "途中経過は赤字にしない");
+
+        pending.SetResult();
+        UiTestHost.DoEvents();
+        Assert.Equal(Visibility.Collapsed, _window.StatusMessageText.Visibility, "開けたら消す");
+        Assert.Equal(0, dialogs.Count);
+        Assert.Equal(1, opened.Count);
+    }
+
+    [Test]
+    public void OpenLocalFile_DoesNotShowProgress()
+    {
+        ShowWindow();
+        SelectAndFocusRow(_store.Find(@"C:\Docs\budget.xlsx")!);
+        _window.IsNetworkPath = _ => false;
+        var pending = new TaskCompletionSource();
+        RecordDialogsAndOpens(_ => pending.Task);
+        _window.HandleGridKey(Key.Enter, ModifierKeys.None);
+        UiTestHost.DoEvents();
+        Assert.Equal(Visibility.Collapsed, _window.StatusMessageText.Visibility, "すぐ開くローカルのファイルでは出さない（ちらつく）");
+        pending.SetResult();
+        UiTestHost.DoEvents();
+    }
+
+    [Test]
+    public void OpenNetworkFile_WhileDisconnected_ShowsRedStatusMessage_NotDialog()
+    {
+        ShowWindow();
+        var entry = _store.Find(@"C:\Docs\budget.xlsx")!;
+        SelectAndFocusRow(entry);
+        _window.IsNetworkPath = _ => true;
+        foreach (var code in new[] { 53, 67, 64, 1231 })
+        {
+            var (dialogs, _) = RecordDialogsAndOpens(_ => Task.FromException(new System.ComponentModel.Win32Exception(code)));
+            _window.HandleGridKey(Key.Enter, ModifierKeys.None);
+            UiTestHost.DoEvents();
+            Assert.Equal(0, dialogs.Count, $"ネットワークに届かないとき（{code}）はダイアログを出さない");
+            Assert.Contains("ネットワーク上の場所に接続できません", _window.StatusMessageText.Text, $"エラー {code}");
+            Assert.Contains(entry.Path, _window.StatusMessageText.Text);
+            Assert.Same(Application.Current.FindResource("ErrorBrush"), _window.StatusMessageText.Foreground, "赤字");
+            Assert.False(entry.IsMissing, "一時的な切断なので、見つからない扱いにはしない");
+        }
+        Assert.True(_window.HistoryGrid.IsKeyboardFocusWithin, "キーボード操作を続けられる");
+    }
+
+    [Test]
+    public void OpeningSameFileTwice_WhileWaiting_OpensOnlyOnce()
+    {
+        ShowWindow();
+        var entry = _store.Find(@"C:\Docs\budget.xlsx")!;
+        SelectAndFocusRow(entry);
+        _window.IsNetworkPath = _ => true;
+        var pending = new TaskCompletionSource();
+        var (_, opened) = RecordDialogsAndOpens(_ => pending.Task);
+
+        _window.HandleGridKey(Key.Enter, ModifierKeys.None);
+        _window.HandleGridKey(Key.Enter, ModifierKeys.None);
+        _window.HandleGridKey(Key.Enter, ModifierKeys.None);
+        UiTestHost.DoEvents();
+        Assert.Equal(1, opened.Count, "応答を待っている間に Enter を押しても、重ねて開かない");
+        Assert.Equal(MainWindow.OpeningMessagePrefix + entry.Path, _window.StatusMessageText.Text, "開いている途中だと知らせる");
+
+        pending.SetException(new System.ComponentModel.Win32Exception(67));
+        UiTestHost.DoEvents();
+        _window.HandleGridKey(Key.Enter, ModifierKeys.None);
+        UiTestHost.DoEvents();
+        Assert.Equal(2, opened.Count, "終わったら、もう一度開ける");
     }
 
     [Test]

@@ -17,11 +17,15 @@ public sealed class HistoryEntry : INotifyPropertyChanged
     {
         Path = path;
         _lastUsed = lastUsed;
+        FirstLastUsed = lastUsed;
         _isKept = isKept;
         _openCount = Math.Max(1, openCount);
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    /// <summary>この起動中に一覧へ入れたときの前回利用日時（読めなかった履歴と後でまとめるときに、回数の重なりを判断する）。</summary>
+    internal DateTime FirstLastUsed { get; }
 
     /// <summary>実ファイルのフルパス（履歴のキー）。</summary>
     public string Path { get; }

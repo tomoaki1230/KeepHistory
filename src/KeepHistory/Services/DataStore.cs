@@ -9,7 +9,20 @@ using KeepHistory.Models;
 namespace KeepHistory.Services;
 
 /// <summary>
+/// 保存したファイルが一時的に読めない（ネットワークの切断、ほかのソフトがファイルをつかんでいるなど）。
+/// 「ファイルが無い」とは区別する。読めないまま空の内容で保存すると、保存してあった内容が消えるため。
+/// </summary>
+public sealed class DataUnavailableException : IOException
+{
+    public DataUnavailableException(string message, Exception? inner = null)
+        : base(message, inner)
+    {
+    }
+}
+
+/// <summary>
 /// %APPDATA%\KeepHistory\ の history.json / deleted.json / settings.json の読み書き。
+/// 読み込みでは「ファイルが無い（初回）」「壊れている（退避して空にする）」「一時的に読めない（DataUnavailableException）」を区別する。
 /// </summary>
 public sealed class DataStore
 {
@@ -35,10 +48,16 @@ public sealed class DataStore
     public string DeletedPath => Path.Combine(Directory, DeletedFileName);
     public string SettingsPath => Path.Combine(Directory, SettingsFileName);
 
+    /// <summary>ほかのソフトがつかんでいるときに読み直す回数と間隔（テストで差し替える）。</summary>
+    internal static int ReadAttempts { get; set; } = 3;
+    internal static TimeSpan RetryDelay { get; set; } = TimeSpan.FromMilliseconds(300);
+
+    /// <exception cref="DataUnavailableException">一時的に読めない。</exception>
     public List<HistoryRecord> LoadHistory() => Load<List<HistoryRecord>>(HistoryPath) ?? new();
 
     public void SaveHistory(List<HistoryRecord> records) => Save(HistoryPath, records);
 
+    /// <exception cref="DataUnavailableException">一時的に読めない。</exception>
     public List<DeletedRecord> LoadDeleted() => Load<List<DeletedRecord>>(DeletedPath) ?? new();
 
     public void SaveDeleted(List<DeletedRecord> records) => Save(DeletedPath, records);
@@ -46,7 +65,18 @@ public sealed class DataStore
     /// <summary>settings.json があるか（無ければ初回起動）。</summary>
     public bool SettingsExists => File.Exists(SettingsPath);
 
+    /// <exception cref="DataUnavailableException">一時的に読めない。</exception>
     public AppSettings LoadSettings() => (Load<AppSettings>(SettingsPath) ?? new AppSettings()).Normalize();
+
+    /// <summary>
+    /// 設定を読む。settings.json が無ければ（初回起動）null。壊れていれば既定値。
+    /// 保存場所に届かない（ネットワークの切断など）ときは、初回と取り違えないよう DataUnavailableException。
+    /// </summary>
+    public AppSettings? LoadSettingsIfExists()
+    {
+        var loaded = Load<AppSettings>(SettingsPath, out var found);
+        return found ? (loaded ?? new AppSettings()).Normalize() : null;
+    }
 
     public void SaveSettings(AppSettings settings) => Save(SettingsPath, settings);
 
@@ -66,27 +96,56 @@ public sealed class DataStore
         File.Delete(SettingsPath + ".tmp");
     }
 
-    private static T? Load<T>(string path) where T : class
+    private T? Load<T>(string path) where T : class => Load<T>(path, out _);
+
+    /// <param name="found">ファイルがあったか（壊れていても true）。</param>
+    private T? Load<T>(string path, out bool found) where T : class
     {
-        if (!File.Exists(path)) return null;
-        try
+        found = false;
+        Exception? last = null;
+        for (int attempt = 1; attempt <= Math.Max(1, ReadAttempts); attempt++)
         {
-            var json = File.ReadAllText(path, Encoding.UTF8);
-            return JsonSerializer.Deserialize<T>(json, Options);
+            if (!File.Exists(path))
+            {
+                // 保存場所に届くなら本当に無い（初回）。届かないなら（ネットワークの切断など）読めないだけ。
+                // 届かない場所への確認は時間がかかるので読み直さない
+                if (IsLocationReachable()) return null;
+                throw Unavailable(path, null);
+            }
+            found = true;
+            try
+            {
+                var json = File.ReadAllText(path, Encoding.UTF8);
+                return JsonSerializer.Deserialize<T>(json, Options);
+            }
+            catch (JsonException ex)
+            {
+                // 壊れたファイルは退避して、空の状態で起動する
+                ErrorLog.Write($"{Path.GetFileName(path)} を読み込めませんでした。退避して空の状態で起動します。", ex);
+                TryBackupBroken(path);
+                return null;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // ほかのソフトがつかんでいる、など。少し待って読み直す
+                last = ex;
+                if (attempt < ReadAttempts) System.Threading.Thread.Sleep(RetryDelay);
+            }
         }
-        catch (JsonException ex)
-        {
-            // 壊れたファイルは退避して、空の状態で起動する
-            ErrorLog.Write($"{Path.GetFileName(path)} を読み込めませんでした。退避して空の状態で起動します。", ex);
-            TryBackupBroken(path);
-            return null;
-        }
-        catch (IOException ex)
-        {
-            ErrorLog.Write($"{Path.GetFileName(path)} を読み込めませんでした。", ex);
-            return null;
-        }
+        throw Unavailable(path, last);
     }
+
+    /// <summary>保存フォルダ（まだ無ければその親）に届くか。</summary>
+    private bool IsLocationReachable()
+    {
+        if (System.IO.Directory.Exists(Directory)) return true;
+        var parent = Path.GetDirectoryName(Directory);
+        return parent != null && System.IO.Directory.Exists(parent);
+    }
+
+    // ログは呼び出し側で書く（読めない間は何度も読み直すので、ここで書くと同じ内容が並ぶ）
+    private static DataUnavailableException Unavailable(string path, Exception? inner)
+        => new($"{Path.GetFileName(path)} を一時的に読み込めません（{path}）。", inner);
 
     private void Save<T>(string path, T value)
     {

@@ -191,6 +191,66 @@ public sealed class HistoryStore
         }
     }
 
+    /// <summary>
+    /// 起動時に読めなかった history.json / deleted.json が読めるようになったとき、この起動中に記録した内容とまとめる。
+    /// 消した記録（保存してあったもの・この起動中に消したもの）を優先し、それより前の利用記録は戻さない。
+    /// キープはどちらかでキープなら残す。開いた回数は、保存してあった回数に、この起動中に増えた分を足す
+    /// （この起動中に最初に記録した 1 回は、保存してあった日時より新しいときだけ数える。同じなら同じ 1 回）。
+    /// </summary>
+    public void MergeLoaded(IEnumerable<HistoryRecord>? records, IEnumerable<DeletedRecord>? deleted)
+    {
+        foreach (var d in deleted ?? Enumerable.Empty<DeletedRecord>())
+        {
+            if (d == null || string.IsNullOrWhiteSpace(d.Path)) continue;
+            if (!DateFormat.TryParseStorage(d.DeletedAt, out var at)) continue;
+            if (_entries.TryGetValue(d.Path, out var current))
+            {
+                // 消した後に開き直されていれば、一覧に残して記録は捨てる（Register と同じ）
+                if (current.LastUsed > at) continue;
+                _entries.Remove(d.Path);
+                Entries.Remove(current);
+            }
+            DateTime? lastUsed = DateFormat.TryParseStorage(d.LastUsed, out var parsed) ? parsed : null;
+            if (!_deleted.TryGetValue(d.Path, out var old) || old.DeletedAt < at)
+            {
+                _deleted[d.Path] = new DeletedHistory(d.Path, at, lastUsed, Math.Max(1, d.OpenCount), d.IsKept);
+            }
+        }
+
+        foreach (var r in records ?? Enumerable.Empty<HistoryRecord>())
+        {
+            if (r == null || string.IsNullOrWhiteSpace(r.Path)) continue;
+            if (!DateFormat.TryParseStorage(r.LastUsed, out var lastUsed)) continue;
+            var count = Math.Max(1, r.OpenCount);
+            if (_deleted.TryGetValue(r.Path, out var removed))
+            {
+                if (lastUsed <= removed.DeletedAt)
+                {
+                    // この起動中に消したもの。元に戻すときのために、保存してあった状態（回数・キープ）も覚える
+                    _deleted[r.Path] = removed with
+                    {
+                        LastUsed = removed.LastUsed is { } l && l > lastUsed ? l : lastUsed,
+                        OpenCount = Math.Max(removed.OpenCount, count),
+                        IsKept = removed.IsKept || r.IsKept,
+                    };
+                    continue;
+                }
+                _deleted.Remove(r.Path);
+            }
+            if (_entries.TryGetValue(r.Path, out var current))
+            {
+                current.IsKept |= r.IsKept;
+                var added = current.OpenCount - 1 + (current.FirstLastUsed > lastUsed ? 1 : 0);
+                current.OpenCount = count + added;
+                if (lastUsed > current.LastUsed) current.LastUsed = lastUsed;
+                continue;
+            }
+            var entry = new HistoryEntry(r.Path, lastUsed, r.IsKept, count);
+            _entries.Add(r.Path, entry);
+            Entries.Add(entry);
+        }
+    }
+
     public List<HistoryRecord> ToHistoryRecords()
         => _entries.Values
             .OrderByDescending(e => e.LastUsed)

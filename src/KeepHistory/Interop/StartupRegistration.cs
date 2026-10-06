@@ -58,6 +58,13 @@ public static class StartupCommand
     public const string ExeName = "KeepHistory.exe";
 
     /// <summary>
+    /// 登録されている exe が無くなっていて（exe を移動した）、登録し直すべきか。
+    /// ネットワーク上の exe は確かめない（切断中だと応答を待って起動が止まり、しかも「無い」と誤って登録を書き換えるため）。
+    /// </summary>
+    public static bool NeedsRepair(string? registeredExe, Func<string, bool> isNetworkPath, Func<string, bool> exists)
+        => registeredExe != null && !isNetworkPath(registeredExe) && !exists(registeredExe);
+
+    /// <summary>
     /// 登録する exe のパス。dotnet.exe 経由で動いているとき（開発時）は、同じフォルダの KeepHistory.exe を使う。見つからなければ null。
     /// </summary>
     public static string? ExecutablePath(string? processPath, string baseDirectory)
