@@ -342,6 +342,8 @@
     <sys:Double x:Key="StarFontSize">15</sys:Double>
     <!-- ツールバーのアイコンフォントの大きさ（アイコンフォントは同じ数値でも字形が一回り大きいので、星より小さい値で見た目をそろえる） -->
     <sys:Double x:Key="ToolbarIconFontSize">13</sys:Double>
+    <!-- 検索欄の「×」の大きさ。検索欄の文字の右の余白（MainWindow.xaml の SearchBox.Padding）はこれより広くする -->
+    <sys:Double x:Key="ClearSearchButtonSize">24</sys:Double>
 
     <Style x:Key="BaseTextStyle" TargetType="TextBlock">
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
@@ -371,6 +373,46 @@
                 <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
             </Trigger>
         </Style.Triggers>
+    </Style>
+
+    <!--
+      検索欄の右端の「×」（検索語を消す）。検索語があるときだけ出す（表示の切り替えは MainWindow.xaml）。
+      Tab で止まらず、押してもフォーカスを奪わない（検索欄 → ↓ で一覧、のキーボードの流れを崩さない）。
+    -->
+    <Style x:Key="ClearSearchButtonStyle" TargetType="Button">
+        <Setter Property="Width" Value="{StaticResource ClearSearchButtonSize}" />
+        <Setter Property="Height" Value="{StaticResource ClearSearchButtonSize}" />
+        <Setter Property="Margin" Value="0,0,3,0" />
+        <Setter Property="HorizontalAlignment" Value="Right" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="IsTabStop" Value="False" />
+        <Setter Property="Foreground" Value="{DynamicResource SubTextBrush}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Cursor" Value="Arrow" />
+        <Setter Property="ToolTip" Value="検索語を消す" />
+        <Setter Property="AutomationProperties.Name" Value="検索語を消す" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="3">
+                        <!-- E711 = Cancel（×） -->
+                        <TextBlock Text="&#xE711;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="10"
+                                   Foreground="{TemplateBinding Foreground}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ControlHoverBrush}" />
+                            <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource BorderBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <Style x:Key="PlaceholderTextStyle" TargetType="TextBlock">

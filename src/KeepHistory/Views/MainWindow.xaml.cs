@@ -579,6 +579,15 @@ public partial class MainWindow : Window
         CloseOrHide();
     }
 
+    /// <summary>検索欄の「×」。検索語を消して、続けて入力できるよう検索欄にフォーカスを置く。</summary>
+    private void OnClearSearchClick(object sender, RoutedEventArgs e) => ClearSearch();
+
+    internal void ClearSearch()
+    {
+        SearchBox.Clear();
+        SearchBox.Focus();
+    }
+
     private void OnSearchBoxPreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Down && HistoryGrid.Items.Count > 0)

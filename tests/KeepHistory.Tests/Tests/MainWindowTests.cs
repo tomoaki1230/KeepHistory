@@ -394,7 +394,7 @@ public sealed class MainWindowTests : IDisposable
             Assert.Same(_window, about.Owner, "履歴画面の上に出す");
             var version = typeof(MainWindow).Assembly.GetName().Version!;
             Assert.Equal("バージョン " + version.ToString(3), about.VersionText.Text, "アプリのバージョン（csproj の Version）");
-            Assert.Equal("1.1.1", AboutWindow.AppVersion);
+            Assert.Equal("1.1.2", AboutWindow.AppVersion);
             Assert.Equal("KeepHistory", about.ProductText.Text);
             Assert.Equal("作成者: Tomoaki Bessho", about.AuthorText.Text, "作成者を表示");
             Assert.Equal("Tomoaki Bessho", AboutWindow.Author, "csproj の作成者から読む");
@@ -651,6 +651,68 @@ public sealed class MainWindowTests : IDisposable
         _window.HandleGridKey(Key.Enter, ModifierKeys.None);
         UiTestHost.DoEvents();
         Assert.Equal(2, opened.Count, "終わったら、もう一度開ける");
+    }
+
+    [Test]
+    public void ClearSearchButton_IsShownOnlyWhileSearching()
+    {
+        ShowWindow();
+        Assert.Equal(Visibility.Collapsed, _window.ClearSearchButton.Visibility, "検索語が無ければ出さない");
+        _vm.SearchText = "budget";
+        UiTestHost.DoEvents();
+        Assert.Equal(Visibility.Visible, _window.ClearSearchButton.Visibility, "検索語があれば出す");
+        _window.SearchBox.Text = string.Empty;
+        UiTestHost.DoEvents();
+        Assert.Equal(Visibility.Collapsed, _window.ClearSearchButton.Visibility, "キーボードで消しても隠れる");
+    }
+
+    [Test]
+    public void ClearSearchButton_ClearsTheSearch_AndKeepsTypingInTheSearchBox()
+    {
+        ShowWindow();
+        _window.SearchBox.Text = "budget";
+        UiTestHost.DoEvents();
+        Assert.Equal(1, _window.HistoryGrid.Items.Count, "前提: 絞り込まれている");
+        // 一覧を操作した後に「×」を押した（フォーカスは一覧にある）
+        SelectAndFocusRow(_store.Find(@"C:\Docs\budget.xlsx")!);
+        Assert.False(_window.SearchBox.IsKeyboardFocused, "前提: フォーカスは一覧");
+
+        var peer = new System.Windows.Automation.Peers.ButtonAutomationPeer(_window.ClearSearchButton);
+        ((System.Windows.Automation.Provider.IInvokeProvider)peer.GetPattern(System.Windows.Automation.Peers.PatternInterface.Invoke)).Invoke();
+        UiTestHost.DoEvents();
+
+        Assert.Equal(string.Empty, _vm.SearchText, "検索語を消す");
+        Assert.Equal(3, _window.HistoryGrid.Items.Count, "一覧が元に戻る");
+        Assert.True(_window.SearchBox.IsKeyboardFocused, "続けて入力できるよう、検索欄にフォーカスを置く");
+        Assert.Equal(Visibility.Collapsed, _window.ClearSearchButton.Visibility);
+    }
+
+    [Test]
+    public void ClearSearchButton_DoesNotDisturbKeyboardFlow_AndHasANameToReadAloud()
+    {
+        ShowWindow();
+        _vm.SearchText = "budget";
+        UiTestHost.DoEvents();
+        var button = _window.ClearSearchButton;
+        Assert.False(button.Focusable, "押してもフォーカスを奪わない");
+        Assert.False(button.IsTabStop, "Tab で止まらない（検索欄 → ↓ で一覧、の流れを崩さない）");
+        Assert.Equal("検索語を消す", System.Windows.Automation.AutomationProperties.GetName(button), "読み上げ名");
+        Assert.Equal("検索語を消す", button.ToolTip as string);
+    }
+
+    [Test]
+    public void ClearSearchButton_SitsInsideTheSearchBox_AndTextDoesNotGoUnderIt()
+    {
+        ShowWindow();
+        _vm.SearchText = "budget";
+        UiTestHost.DoEvents();
+        var box = _window.SearchBox;
+        var button = _window.ClearSearchButton;
+        var buttonBox = button.TransformToVisual(box).TransformBounds(new Rect(0, 0, button.ActualWidth, button.ActualHeight));
+        Assert.True(buttonBox.Left >= 0 && buttonBox.Right <= box.ActualWidth && buttonBox.Top >= 0 && buttonBox.Bottom <= box.ActualHeight,
+            $"検索欄の中に収まる（{buttonBox} / {box.ActualWidth}×{box.ActualHeight}）");
+        Assert.True(box.ActualWidth - buttonBox.Right < 8, "右端に置く");
+        Assert.True(box.Padding.Right >= box.ActualWidth - buttonBox.Left, $"文字の右の余白（{box.Padding.Right}）が「×」の幅以上なので、長い検索語が隠れない");
     }
 
     [Test]

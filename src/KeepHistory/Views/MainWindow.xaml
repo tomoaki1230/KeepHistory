@@ -59,7 +59,9 @@
                       ItemsSource="{Binding ExtensionChoices}" SelectedItem="{Binding SelectedExtension}"
                       DisplayMemberPath="Label" Style="{StaticResource ToolbarComboStyle}" />
             <Grid>
+                <!-- 右の余白（30）は「×」（ClearSearchButtonSize 24 + 余白）に文字が隠れないため -->
                 <TextBox x:Name="SearchBox" AutomationProperties.Name="ファイル名・パスで検索" Style="{StaticResource SearchBoxStyle}"
+                         Padding="6,0,30,0"
                          Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
                          PreviewKeyDown="OnSearchBoxPreviewKeyDown" />
                 <TextBlock Text="ファイル名・パスで検索（スペース区切りで AND）">
@@ -74,6 +76,18 @@
                         </Style>
                     </TextBlock.Style>
                 </TextBlock>
+                <!-- 検索語を消す（検索語があるときだけ出す） -->
+                <Button x:Name="ClearSearchButton" Click="OnClearSearchClick">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource ClearSearchButtonStyle}">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding Text.Length, ElementName=SearchBox}" Value="0">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
             </Grid>
         </DockPanel>
 
