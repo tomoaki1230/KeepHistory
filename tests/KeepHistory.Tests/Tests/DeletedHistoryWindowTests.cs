@@ -30,9 +30,12 @@ public sealed class DeletedHistoryWindowTests : IDisposable
     public void ListsDeletedHistory_NewestFirst()
     {
         var items = _window.DeletedGrid.Items.Cast<DeletedHistory>().Select(d => d.FileName);
-        Assert.SequenceEqual(new[] { "b.txt", "a.txt" }, items, "削除した履歴を、新しく削除した順に並べる");
+        Assert.SequenceEqual(new[] { "b.txt", "a.txt" }, items, "外した履歴を、新しく外した順に並べる");
         Assert.False(_window.RestoreButton.IsEnabled, "選ぶまでは押せない");
         Assert.Equal(System.Windows.Visibility.Collapsed, _window.EmptyText.Visibility);
+        Assert.Equal("外した履歴を戻す", _window.Title, "「削除」ではなく「外す」と言う（ファイルが消えたと誤解させない）");
+        Assert.Equal("外した日時", _window.DeletedGrid.Columns.Last().Header as string);
+        Assert.Equal("外した履歴はありません。", _window.EmptyText.Text);
     }
 
     [Test]

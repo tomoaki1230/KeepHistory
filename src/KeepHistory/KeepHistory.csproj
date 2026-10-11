@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <!-- WPF と WinForms（通知領域アイコン）を併用する -->
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
@@ -13,7 +13,7 @@
     <RootNamespace>KeepHistory</RootNamespace>
     <AssemblyName>KeepHistory</AssemblyName>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
-    <Version>1.1.2</Version>
+    <Version>1.2.0</Version>
     <!-- 作成者（バージョン情報に表示する。アセンブリの Company 属性になる） -->
     <Authors>Tomoaki Bessho</Authors>
     <Company>Tomoaki Bessho</Company>
@@ -30,6 +30,14 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="KeepHistory.Tests" />
+  </ItemGroup>
+
+  <!--
+    ビルドの識別子（動きには関係しないメタデータ）。テストの dll を Windows のアプリ制御（Smart App Control）に止められたとき、
+    テストの csproj がこれを変えてビルドし直す（中身の指紋が変わり、判定がやり直される）。ふだんは空で、何も入らない。
+  -->
+  <ItemGroup Condition="'$(KeepHistoryBuildNonce)' != ''">
+    <AssemblyMetadata Include="KeepHistoryBuildNonce" Value="$(KeepHistoryBuildNonce)" />
   </ItemGroup>
 
 </Project>

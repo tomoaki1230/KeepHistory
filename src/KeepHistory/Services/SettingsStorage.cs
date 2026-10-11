@@ -18,13 +18,8 @@ public sealed class SettingsStorage
     /// <summary>削除した後で、自動保存を止めているか。</summary>
     public bool IsSuspended { get; private set; }
 
-    /// <summary>settings.json があるか（無ければ初回起動）。</summary>
-    public bool Exists => _data.SettingsExists;
-
     /// <summary>settings.json を一時的に読めず、既定値で動いているか（読めるまで自動保存しない）。</summary>
     public bool LoadFailed { get; private set; }
-
-    public AppSettings Load() => _data.LoadSettings();
 
     /// <summary>
     /// 設定を読む。結果は Loaded（読めた）・NotFound（初回起動。settings は既定値）・Unavailable（一時的に読めない。settings は既定値）。

@@ -51,7 +51,8 @@ public sealed class ExclusionAdderTests
         });
 
         Assert.True(added);
-        Assert.Contains("2 件を一覧から削除します", Assert.NotNull(asked), "消える件数を示す（キープは数えない）");
+        Assert.Contains("2 件を一覧から外します", Assert.NotNull(asked), "外れる件数を示す（キープは数えない）");
+        Assert.Contains("パソコンのファイルは削除しません", asked, "ファイルは消えないと伝える");
         Assert.Contains("キープした履歴は残ります", asked);
         Assert.True(settings.ExcludePatterns.Contains(@"C:\Docs\*"), "設定に追加する");
         Assert.SequenceEqual(new[] { @"C:\Docs\kept.xlsx", @"C:\Docs2\c.txt" }, store.Entries.Select(e => e.Path).OrderBy(p => p));

@@ -90,7 +90,7 @@ public sealed class NetworkResilienceTests : IDisposable
     }
 
     [Test]
-    public void MissingFile_InReachableLocation_IsFirstRun()
+    public void FirstRun_IsDetectedOnlyWhenTheFileIsReallyMissing()
     {
         var notCreatedYet = new DataStore(Path.Combine(_dir.Path, "KeepHistory"));
         Assert.Null(notCreatedYet.LoadSettingsIfExists(), "保存フォルダがまだ無い（親は見える）なら初回");
@@ -98,6 +98,13 @@ public sealed class NetworkResilienceTests : IDisposable
 
         var empty = new DataStore(_dir.Path);
         Assert.Null(empty.LoadSettingsIfExists(), "フォルダはあるがファイルが無いなら初回");
+        var storage = new SettingsStorage(empty);
+        Assert.Equal(SettingsLoadResult.NotFound, storage.TryLoad(out var defaults), "設定の読み込みも初回と判断する");
+        Assert.False(storage.LoadFailed, "初回は読めなかった扱いにしない（自動保存してよい）");
+        Assert.NotNull(defaults);
+        storage.SaveConfirmed(new AppSettings());
+        Assert.Equal(SettingsLoadResult.Loaded, storage.TryLoad(out _), "一度保存したら初回ではない");
+
         File.WriteAllText(empty.SettingsPath, "{ broken");
         Assert.NotNull(empty.LoadSettingsIfExists(), "壊れたファイルは初回ではない（既定値で動く）");
     }
@@ -138,17 +145,6 @@ public sealed class NetworkResilienceTests : IDisposable
         storage.SaveConfirmed(new AppSettings { RetentionDays = 90 });
         Assert.False(storage.LoadFailed, "利用者が確定した設定は保存し、自動保存も再開する");
         Assert.Equal(90, data.LoadSettings().RetentionDays);
-    }
-
-    [Test]
-    public void SettingsLoad_DistinguishesFirstRun()
-    {
-        var storage = new SettingsStorage(new DataStore(_dir.Path));
-        Assert.Equal(SettingsLoadResult.NotFound, storage.TryLoad(out var settings), "初回起動");
-        Assert.False(storage.LoadFailed);
-        Assert.NotNull(settings);
-        storage.SaveConfirmed(new AppSettings());
-        Assert.Equal(SettingsLoadResult.Loaded, storage.TryLoad(out _));
     }
 
     // ---- 読めるようになったら、この起動中の記録とまとめる ----
@@ -252,16 +248,10 @@ public sealed class NetworkResilienceTests : IDisposable
         Assert.Equal(0, checkedPaths.Count, "応答を待つ File.Exists は呼ばない");
         Assert.True(checker.IsMissing(@"E:\usb\a.txt"), "ネットワークドライブでないドライブは従来どおり確かめる");
         Assert.Equal(1, checkedPaths.Count);
-    }
 
-    [Test]
-    public void RealRegistryLookup_DoesNotThrow()
-    {
-        var checker = new FileExistenceChecker();
-        foreach (var letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-        {
-            checker.IsNetworkPath($@"{letter}:\a.txt");
-        }
+        // 本物のレジストリ（HKCU\Network）を読んでも、どのドライブ文字でも例外にならない
+        var real = new FileExistenceChecker();
+        foreach (var letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ") real.IsNetworkPath($@"{letter}:\a.txt");
     }
 
     // ---- スタートアップ登録の確認 ----
@@ -281,6 +271,24 @@ public sealed class NetworkResilienceTests : IDisposable
         Assert.True(StartupCommand.NeedsRepair(@"C:\Old\KeepHistory.exe", _ => false, Exists), "ローカルで消えていれば登録し直す");
         Assert.False(StartupCommand.NeedsRepair(@"C:\Tools\KeepHistory.exe", _ => false, _ => true));
         Assert.False(StartupCommand.NeedsRepair(null, _ => false, Exists), "登録が無ければ何もしない");
+    }
+
+    // ---- 読み直しの間隔（切断が続く間は空けていく） ----
+
+    [Test]
+    public void RecoveryBackoff_WaitsLongerWhileStillFailing_AndResetsWhenRecovered()
+    {
+        var backoff = new RecoveryBackoff();
+        var seconds = new List<double> { backoff.Current.TotalSeconds };
+        for (int i = 0; i < 6; i++)
+        {
+            backoff.Failed();
+            seconds.Add(backoff.Current.TotalSeconds);
+        }
+        Assert.SequenceEqual(new double[] { 30, 60, 120, 240, 300, 300, 300 }, seconds,
+            "最初は 30 秒、直らなければ倍にしていき、5 分で止める（ネットワークへの問い合わせを控えめにする）");
+        backoff.Reset();
+        Assert.Equal(TimeSpan.FromSeconds(30), backoff.Current, "直ったら・新しく止まったら 30 秒に戻す");
     }
 
     // ---- 「最近使った項目」の監視の始め直し ----

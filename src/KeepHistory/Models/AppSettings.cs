@@ -53,6 +53,18 @@ public sealed class AppSettings
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public AppTheme Theme { get; set; } = AppTheme.System;
 
+    /// <summary>前回利用日時で並べているとき、一覧を「今日」「昨日」などでまとめるか（既定はまとめる）。</summary>
+    public bool GroupByDate { get; set; } = true;
+
+    /// <summary>
+    /// 削除・移動などで見つからないローカルのファイルを一覧に出さないか（表示メニュー。既定は出さない＝オン。2026-10-11 に利用者の指示で変更）。
+    /// ネットワーク上のファイルは実在確認しないので対象外（3.7）。
+    /// </summary>
+    public bool HideMissingFiles { get; set; } = true;
+
+    /// <summary>ネットワーク上のファイル（UNC・割り当てたネットワークドライブ）を一覧に出さないか（表示メニュー。既定は出す）。</summary>
+    public bool HideNetworkFiles { get; set; }
+
     /// <summary>
     /// Windows の起動時に起動するか。settings.json には保存しない（Windows のスタートアップ登録そのものが正）。
     /// 設定画面を開く前に登録の状態を入れ、OK したら登録・解除する。
@@ -61,6 +73,18 @@ public sealed class AppSettings
     public bool StartWithWindows { get; set; }
 
     public List<ColumnLayout> Columns { get; set; } = new();
+
+    /// <summary>
+    /// Windows の起動時に起動する登録があるのに常駐しない設定なら、常駐する設定に直す。直したら true（保存が必要）。
+    /// 起動時に起動して常駐しないと、サインインのたびに画面が開いてしまうため、この組み合わせは選べないようにしている
+    /// （設定画面・初回の確認でも選べない。以前の版で選んでいた場合も、起動時にここで直す）。
+    /// </summary>
+    public bool EnsureResidentWhenStartingWithWindows(bool startupRegistered)
+    {
+        if (!startupRegistered || StayResident) return false;
+        StayResident = true;
+        return true;
+    }
 
     /// <summary>読み込んだ値を妥当な範囲に収める。</summary>
     public AppSettings Normalize()
@@ -107,6 +131,9 @@ public sealed class AppSettings
         WindowLeft = WindowLeft,
         WindowTop = WindowTop,
         Theme = Theme,
+        GroupByDate = GroupByDate,
+        HideMissingFiles = HideMissingFiles,
+        HideNetworkFiles = HideNetworkFiles,
         StartWithWindows = StartWithWindows,
         Columns = Columns.Select(c => new ColumnLayout { Id = c.Id, Width = c.Width, DisplayIndex = c.DisplayIndex }).ToList(),
     };

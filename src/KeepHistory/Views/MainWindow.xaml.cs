@@ -252,6 +252,18 @@ public partial class MainWindow : Window
         => HistoryGrid.SelectedItem as HistoryEntry
            ?? (HistoryGrid.Items.Count > 0 ? HistoryGrid.Items[0] as HistoryEntry : null);
 
+    /// <summary>
+    /// 今押されている修飾キー（Ctrl・Shift・Alt）。テストでは「何も押していない」に差し替える
+    /// （差し替えないと、テストの実行中に実際のキーボードで Shift などを押したときに、キー操作のテストが失敗する）。
+    /// </summary>
+    internal Func<ModifierKeys> CurrentModifiers { get; set; } = () => Keyboard.Modifiers;
+
+    /// <summary>エクスプローラーでファイルを選んだ状態で開く処理（テストで差し替える）。</summary>
+    internal Func<string, Task> RevealInExplorer { get; set; } = ShellActions.RevealInExplorerAsync;
+
+    /// <summary>フォルダだけを開く処理（見つからないファイルのとき。テストで差し替える）。</summary>
+    internal Func<string, Task> OpenFolderOnly { get; set; } = ShellActions.OpenFolderAsync;
+
     /// <summary>ファイルを開く処理（テストで差し替える）。</summary>
     internal Func<string, Task> OpenFile { get; set; } = ShellActions.OpenAsync;
 
@@ -274,6 +286,7 @@ public partial class MainWindow : Window
             ShowNotFound(entry.Path);
             return;
         }
+        _vm.RememberSearch();
         var path = entry.Path;
         var progress = OpeningMessagePrefix + path;
         if (!_opening.Add(path))
@@ -320,7 +333,7 @@ public partial class MainWindow : Window
     }
 
     /// <summary>ステータスバーに、途中経過（開いています など）を通常の淡い文字で出す。</summary>
-    private void ShowProgressMessage(string message)
+    internal void ShowProgressMessage(string message)
     {
         StatusMessageText.SetResourceReference(TextBlock.ForegroundProperty, "SubTextBrush");
         StatusMessageText.Text = message;
@@ -333,7 +346,21 @@ public partial class MainWindow : Window
         StatusMessageText.Visibility = Visibility.Collapsed;
     }
 
-    private void OnGridSelectionChanged(object sender, SelectionChangedEventArgs e) => ClearStatusMessage();
+    private void OnGridSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        ClearStatusMessage();
+        UpdateTitle();
+    }
+
+    /// <summary>行を選んでいないときのタイトル（アプリ名だけ）。</summary>
+    public const string DefaultTitle = "KeepHistory";
+
+    /// <summary>
+    /// タイトルバー（とタスクバー）に、選んでいる行のファイル名を出す（「KeepHistory - （ファイル名）」）。選んでいなければアプリ名だけ
+    /// （絞り込み・削除・更新で選んでいた行が外れたときも同じ）。
+    /// </summary>
+    private void UpdateTitle()
+        => Title = HistoryGrid.SelectedItem is HistoryEntry entry ? $"KeepHistory - {entry.FileName}" : DefaultTitle;
 
     /// <summary>起動時に「ファイルが無い」「パスが無い」で失敗したか。</summary>
     private static bool IsNotFound(Exception? ex)
@@ -351,7 +378,8 @@ public partial class MainWindow : Window
     private void OpenFolder(HistoryEntry? entry)
     {
         if (entry == null) return;
-        var task = entry.IsMissing ? ShellActions.OpenFolderAsync(entry.FolderPath) : ShellActions.RevealInExplorerAsync(entry.Path);
+        _vm.RememberSearch();
+        var task = entry.IsMissing ? OpenFolderOnly(entry.FolderPath) : RevealInExplorer(entry.Path);
         RunShellAction(task, entry.Path);
     }
 
@@ -450,6 +478,7 @@ public partial class MainWindow : Window
             ShowNotFound(entry.Path);
             return;
         }
+        _vm.RememberSearch();
         var owner = new System.Windows.Interop.WindowInteropHelper(this).Handle;
         if (!ShowOpenWith(owner, entry.Path))
         {
@@ -504,6 +533,43 @@ public partial class MainWindow : Window
             HistoryGrid.SelectedIndex = Math.Clamp(index, 0, HistoryGrid.Items.Count - 1);
             FocusSelectedRow();
         }
+        // 行を選び直すとステータスバーの表示は消えるので、その後に出す
+        ShowProgressMessage($"{DeletedMessagePrefix}{entries[0].FileName}（ファイルはそのままです。Ctrl+Z で戻せます）");
+    }
+
+    /// <summary>
+    /// 画面のどこでも Ctrl+Z で削除を取り消す。ただし文字の入力欄（検索欄など）では、その欄の「元に戻す」を優先する。
+    /// 処理したら true（テストから直接呼ぶ）。
+    /// </summary>
+    internal bool HandleUndoKey(Key key, ModifierKeys modifiers, IInputElement? focused)
+    {
+        if (key != Key.Z || modifiers != ModifierKeys.Control || focused is TextBoxBase) return false;
+        UndoDelete();
+        return true;
+    }
+
+    // Delete キーの操作は「一覧から外す」と言う（「削除」だとファイルが消えると誤解されやすいため）
+    internal const string DeletedMessagePrefix = "一覧から外しました: ";
+    internal const string RestoredMessagePrefix = "一覧に戻しました: ";
+    internal const string NothingToUndoMessage = "戻せるものはありません";
+
+    /// <summary>直前の削除を取り消し（Ctrl+Z）、戻した行を選ぶ。</summary>
+    internal void UndoDelete()
+    {
+        var restored = _vm.UndoDelete();
+        if (restored.Count == 0)
+        {
+            ShowProgressMessage(NothingToUndoMessage);
+            return;
+        }
+        // 絞り込みで見えないこともあるので、見えている行だけ選ぶ
+        var visible = restored.FirstOrDefault(e => HistoryGrid.Items.Contains(e));
+        if (visible != null)
+        {
+            HistoryGrid.SelectedItem = visible;
+            FocusSelectedRow();
+        }
+        ShowProgressMessage(RestoredMessagePrefix + restored[0].FileName);
     }
 
     /// <summary>
@@ -555,16 +621,20 @@ public partial class MainWindow : Window
 
     private void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if ((e.Key == Key.F || e.Key == Key.L) && Keyboard.Modifiers == ModifierKeys.Control)
+        if ((e.Key == Key.F || e.Key == Key.L) && CurrentModifiers() == ModifierKeys.Control)
         {
             e.Handled = true;
             FocusSearchBox();
         }
-        else if (e.Key == Key.F5 && Keyboard.Modifiers == ModifierKeys.None)
+        else if (e.Key == Key.F5 && CurrentModifiers() == ModifierKeys.None)
         {
             // 「↻ 更新」と同じ（強制リフレッシュ）
             e.Handled = true;
-            RefreshRequested?.Invoke(this, EventArgs.Empty);
+            RequestRefresh();
+        }
+        else if (HandleUndoKey(e.Key, CurrentModifiers(), Keyboard.FocusedElement))
+        {
+            e.Handled = true;
         }
     }
 
@@ -589,32 +659,151 @@ public partial class MainWindow : Window
     }
 
     private void OnSearchBoxPreviewKeyDown(object sender, KeyEventArgs e)
+        => e.Handled = HandleSearchBoxKey(e.Key == Key.System ? e.SystemKey : e.Key, CurrentModifiers());
+
+    /// <summary>検索欄でのキー操作。処理したら true（テストから直接呼ぶ）。</summary>
+    internal bool HandleSearchBoxKey(Key key, ModifierKeys modifiers)
     {
-        if (e.Key == Key.Down && HistoryGrid.Items.Count > 0)
+        if (key == Key.Down && modifiers == ModifierKeys.Alt)
         {
-            e.Handled = true;
+            // 最近の検索語を出す（プルダウンと同じ操作）
+            return OpenRecentSearches();
+        }
+        if (key is not (Key.Down or Key.Enter)) return false;
+        // 入力が止まるのを待っている検索があれば、先に絞り込む（古い一覧のファイルを開かないように）
+        _vm.FlushPendingSearch();
+        if (key == Key.Down)
+        {
+            if (HistoryGrid.Items.Count == 0) return false;
             if (HistoryGrid.SelectedIndex < 0) HistoryGrid.SelectedIndex = 0;
             FocusSelectedRow();
         }
-        else if (e.Key == Key.Enter)
+        else if (modifiers == ModifierKeys.Control)
+        {
+            OpenFolder(CurrentEntry());
+        }
+        else
+        {
+            OpenEntry(CurrentEntry());
+        }
+        return true;
+    }
+
+    // ---- 最近の検索語 ----
+
+    private void OnRecentSearchClick(object sender, RoutedEventArgs e) => OpenRecentSearches();
+
+    /// <summary>最近の検索語の一覧を出し、キーボードで選べるようにする。覚えている語が無ければ false。</summary>
+    internal bool OpenRecentSearches()
+    {
+        if (_vm.RecentSearches.Items.Count == 0) return false;
+        RecentSearchPopup.IsOpen = true;
+        RecentSearchList.SelectedIndex = 0;
+        RecentSearchList.UpdateLayout();
+        (RecentSearchList.ItemContainerGenerator.ContainerFromIndex(0) as ListBoxItem)?.Focus();
+        return true;
+    }
+
+    /// <summary>最近の検索語を選んだ。その語で検索し、続けて入力できるよう検索欄に戻る。</summary>
+    internal void ApplyRecentSearch(string term)
+    {
+        RecentSearchPopup.IsOpen = false;
+        _vm.SearchText = term;
+        _vm.FlushPendingSearch();
+        SearchBox.Focus();
+        SearchBox.CaretIndex = SearchBox.Text.Length;
+    }
+
+    private void OnClearRecentSearchesInListClick(object sender, RoutedEventArgs e) => ClearRecentSearchesFromList();
+
+    /// <summary>一覧の下の「履歴を消す」。覚えている検索語をすべて消し（すぐ保存される）、一覧を閉じて検索欄に戻る。</summary>
+    internal void ClearRecentSearchesFromList()
+    {
+        _vm.RecentSearches.Clear();
+        CloseRecentSearches();
+    }
+
+    private void CloseRecentSearches()
+    {
+        RecentSearchPopup.IsOpen = false;
+        SearchBox.Focus();
+    }
+
+    private void OnRecentSearchListPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter && sender == RecentSearchList && RecentSearchList.SelectedItem is string term)
         {
             e.Handled = true;
-            OpenEntry(CurrentEntry());
+            ApplyRecentSearch(term);
+        }
+        else if (e.Key == Key.Escape)
+        {
+            // 一覧だけを閉じる（画面までは閉じない）
+            e.Handled = true;
+            CloseRecentSearches();
+        }
+    }
+
+    private void OnRecentSearchListMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (FindAncestor<ListBoxItem>(e.OriginalSource as DependencyObject) is { Content: string term }) ApplyRecentSearch(term);
+    }
+
+    // ---- フォルダで絞り込む ----
+
+    private void OnShowFolderFilesClick(object sender, RoutedEventArgs e) => ShowFolderFiles(HistoryGrid.SelectedItem as HistoryEntry);
+
+    /// <summary>この行のフォルダの直下のファイルだけを表示する。選んでいた行は選んだまま。</summary>
+    internal void ShowFolderFiles(HistoryEntry? entry)
+    {
+        if (entry == null) return;
+        _vm.FolderFilter = entry.FolderPath;
+        if (HistoryGrid.Items.Contains(entry))
+        {
+            HistoryGrid.SelectedItem = entry;
+            FocusSelectedRow();
+        }
+    }
+
+    private void OnClearFolderFilterClick(object sender, RoutedEventArgs e) => ClearFolderFilter();
+
+    /// <summary>フォルダの絞り込みを解除する。選んでいた行は選んだまま。</summary>
+    internal void ClearFolderFilter()
+    {
+        var selected = HistoryGrid.SelectedItem;
+        _vm.FolderFilter = null;
+        if (selected != null && HistoryGrid.Items.Contains(selected))
+        {
+            HistoryGrid.SelectedItem = selected;
+            FocusSelectedRow();
+        }
+        else
+        {
+            FocusSearchBox();
         }
     }
 
     private void OnGridPreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (HandleGridKey(e.Key, Keyboard.Modifiers)) e.Handled = true;
+        if (HandleGridKey(e.Key, CurrentModifiers())) e.Handled = true;
     }
 
     /// <summary>一覧でのキー操作。処理したら true（テストから直接呼ぶ）。</summary>
     internal bool HandleGridKey(Key key, ModifierKeys modifiers)
     {
         var ctrl = modifiers == ModifierKeys.Control;
-        if (key == Key.Enter)
+        if (key == Key.Enter && ctrl)
+        {
+            // フォルダを開く（エクスプローラーでそのファイルを選んだ状態）
+            OpenFolder(HistoryGrid.SelectedItem as HistoryEntry);
+        }
+        else if (key == Key.Enter)
         {
             OpenEntry(HistoryGrid.SelectedItem as HistoryEntry);
+        }
+        else if (key == Key.Z && ctrl)
+        {
+            UndoDelete();
         }
         else if (key == Key.Delete)
         {
@@ -745,7 +934,17 @@ public partial class MainWindow : Window
 
     private void OnSettingsClick(object sender, RoutedEventArgs e) => SettingsRequested?.Invoke(this, EventArgs.Empty);
 
-    private void OnRefreshClick(object sender, RoutedEventArgs e) => RefreshRequested?.Invoke(this, EventArgs.Empty);
+    private void OnRefreshClick(object sender, RoutedEventArgs e) => RequestRefresh();
+
+    /// <summary>
+    /// 「↻ 更新」・F5。一覧を作り直す前に、行の選択を外す（未選択の状態にする。一覧を読み直した後に、前の行を選んだまま残さない）。
+    /// </summary>
+    internal void RequestRefresh()
+    {
+        HistoryGrid.UnselectAll();
+        HistoryGrid.CurrentCell = default;
+        RefreshRequested?.Invoke(this, EventArgs.Empty);
+    }
 
     /// <summary>モーダル画面の表示（テストで差し替える）。</summary>
     internal Func<Window, bool?> ShowDialogWindow { get; set; } = window => window.ShowDialog();

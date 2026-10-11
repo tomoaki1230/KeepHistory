@@ -9,6 +9,7 @@
                     xmlns:views="clr-namespace:KeepHistory.Views">
 
     <views:NullToCollapsedConverter x:Key="NullToCollapsedConverter" />
+    <views:FileIconConverter x:Key="FileIconConverter" />
 
     <!-- 色は Colors.Light.xaml / Colors.Dark.xaml にあり、ThemeManager が入れ替える。ここからは必ず DynamicResource で参照する -->
 
@@ -92,7 +93,11 @@
                             <Border MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"
                                     MaxHeight="{TemplateBinding MaxDropDownHeight}" Margin="0,2,0,0"
                                     Background="{DynamicResource PopupBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
-                                <ScrollViewer SnapsToDevicePixels="True">
+                                <!--
+                                  スクロールはピクセル単位（CanContentScroll="False"）。1 項目ずつのスクロールだと、項目の高さで割り切れない分が
+                                  いちばん下までスクロールしたときに最後の項目の下の空きとして残る（約 15 px）。項目は仮想化していないので遅くならない
+                                -->
+                                <ScrollViewer SnapsToDevicePixels="True" CanContentScroll="False">
                                     <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained" />
                                 </ScrollViewer>
                             </Border>
@@ -135,12 +140,49 @@
         </ControlTemplate.Triggers>
     </ControlTemplate>
 
+    <!--
+      チェックで切り替えるメニューの項目（表示メニューなど）。標準のテンプレートはチェックの印の色が固定で、ダークでは見えなくなるため、
+      印をアイコン（E73E = CheckMark）で描き、テーマの色にする。マウスを乗せたときの色はメニューバーと同じ。
+    -->
+    <ControlTemplate x:Key="CheckableSubmenuItemTemplate" TargetType="MenuItem">
+        <Border x:Name="Bd" Background="Transparent" Padding="0,4,16,4" CornerRadius="2">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="28" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="CheckMark" Text="&#xE73E;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="12"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                           Foreground="{DynamicResource AccentBrush}" Visibility="Hidden" />
+                <ContentPresenter Grid.Column="1" ContentSource="Header" RecognizesAccessKey="True" VerticalAlignment="Center" />
+            </Grid>
+        </Border>
+        <ControlTemplate.Triggers>
+            <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="CheckMark" Property="Visibility" Value="Visible" />
+            </Trigger>
+            <Trigger Property="IsHighlighted" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ControlHoverBrush}" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter TargetName="Bd" Property="Opacity" Value="0.5" />
+            </Trigger>
+        </ControlTemplate.Triggers>
+    </ControlTemplate>
+
     <Style TargetType="MenuItem">
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
         <Style.Triggers>
             <Trigger Property="Role" Value="TopLevelHeader">
                 <Setter Property="Template" Value="{StaticResource TopLevelHeaderTemplate}" />
             </Trigger>
+            <MultiTrigger>
+                <MultiTrigger.Conditions>
+                    <Condition Property="Role" Value="SubmenuItem" />
+                    <Condition Property="IsCheckable" Value="True" />
+                </MultiTrigger.Conditions>
+                <Setter Property="Template" Value="{StaticResource CheckableSubmenuItemTemplate}" />
+            </MultiTrigger>
         </Style.Triggers>
     </Style>
 
@@ -342,8 +384,9 @@
     <sys:Double x:Key="StarFontSize">15</sys:Double>
     <!-- ツールバーのアイコンフォントの大きさ（アイコンフォントは同じ数値でも字形が一回り大きいので、星より小さい値で見た目をそろえる） -->
     <sys:Double x:Key="ToolbarIconFontSize">13</sys:Double>
-    <!-- 検索欄の「×」の大きさ。検索欄の文字の右の余白（MainWindow.xaml の SearchBox.Padding）はこれより広くする -->
+    <!-- 検索欄の中のボタン（「×」と「▾」）の大きさ。検索欄の文字の右の余白（MainWindow.xaml の SearchBox.Padding）は 2 つ分より広くする -->
     <sys:Double x:Key="ClearSearchButtonSize">24</sys:Double>
+    <sys:Double x:Key="SearchDropDownButtonWidth">26</sys:Double>
 
     <Style x:Key="BaseTextStyle" TargetType="TextBlock">
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
@@ -376,30 +419,27 @@
     </Style>
 
     <!--
-      検索欄の右端の「×」（検索語を消す）。検索語があるときだけ出す（表示の切り替えは MainWindow.xaml）。
+      検索欄の中のアイコンのボタン（「×」）。表示の切り替えは MainWindow.xaml。
       Tab で止まらず、押してもフォーカスを奪わない（検索欄 → ↓ で一覧、のキーボードの流れを崩さない）。
+      記号は Content に Segoe Fluent Icons の文字で入れる。
     -->
-    <Style x:Key="ClearSearchButtonStyle" TargetType="Button">
+    <Style x:Key="SearchBoxIconButtonStyle" TargetType="Button">
         <Setter Property="Width" Value="{StaticResource ClearSearchButtonSize}" />
         <Setter Property="Height" Value="{StaticResource ClearSearchButtonSize}" />
         <Setter Property="Margin" Value="0,0,3,0" />
-        <Setter Property="HorizontalAlignment" Value="Right" />
         <Setter Property="VerticalAlignment" Value="Center" />
         <Setter Property="Focusable" Value="False" />
         <Setter Property="IsTabStop" Value="False" />
         <Setter Property="Foreground" Value="{DynamicResource SubTextBrush}" />
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Cursor" Value="Arrow" />
-        <Setter Property="ToolTip" Value="検索語を消す" />
-        <Setter Property="AutomationProperties.Name" Value="検索語を消す" />
+        <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets" />
+        <Setter Property="FontSize" Value="10" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="3">
-                        <!-- E711 = Cancel（×） -->
-                        <TextBlock Text="&#xE711;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="10"
-                                   Foreground="{TemplateBinding Foreground}"
-                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
@@ -413,6 +453,141 @@
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
+    </Style>
+
+    <!-- 検索欄の右端の「×」（検索語を消す。検索語があるときだけ出す）。E711 = Cancel -->
+    <Style x:Key="ClearSearchButtonStyle" TargetType="Button" BasedOn="{StaticResource SearchBoxIconButtonStyle}">
+        <Setter Property="Content" Value="&#xE711;" />
+        <Setter Property="ToolTip" Value="検索語を消す" />
+        <Setter Property="AutomationProperties.Name" Value="検索語を消す" />
+    </Style>
+
+    <!--
+      最近の検索語を出す「▾」（検索欄の右端。プルダウンと同じ形で、押すと候補が出ると分かるようにする）。常に出し、
+      覚えている検索語が無いときは薄くして押せなくする（出たり消えたりしないので見た目が変わらない）。
+      左の区切り線で入力部分と分ける。矢印はプルダウン（ComboBox）と同じ形。フォーカスを奪わず Tab で止まらない。
+    -->
+    <Style x:Key="SearchDropDownButtonStyle" TargetType="Button">
+        <Setter Property="Width" Value="{StaticResource SearchDropDownButtonWidth}" />
+        <Setter Property="VerticalAlignment" Value="Stretch" />
+        <Setter Property="Margin" Value="0,1,1,1" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="IsTabStop" Value="False" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource SubTextBrush}" />
+        <Setter Property="Cursor" Value="Arrow" />
+        <Setter Property="ToolTip" Value="最近の検索語（Alt+↓）" />
+        <Setter Property="ToolTipService.ShowOnDisabled" Value="True" />
+        <Setter Property="AutomationProperties.Name" Value="最近の検索語" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{DynamicResource BorderBrush}"
+                            BorderThickness="1,0,0,0" CornerRadius="0,3,3,0">
+                        <Path x:Name="Arrow" HorizontalAlignment="Center" VerticalAlignment="Center"
+                              Data="M0,0 L4,4 L8,0" Stroke="{TemplateBinding Foreground}" StrokeThickness="1.5" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ControlHoverBrush}" />
+                            <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource BorderBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Arrow" Property="Opacity" Value="0.35" />
+                            <Setter Property="ToolTip" Value="最近の検索語はまだありません" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- 最近の検索語の一覧の下の「履歴を消す」（文字だけの目立たないボタン） -->
+    <Style x:Key="PopupLinkButtonStyle" TargetType="Button">
+        <Setter Property="Foreground" Value="{DynamicResource SubTextBrush}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Padding" Value="8,4" />
+        <Setter Property="HorizontalAlignment" Value="Right" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}" CornerRadius="3">
+                        <ContentPresenter />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource RowHoverBrush}" />
+                            <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource RowHoverBrush}" />
+                            <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- 最近の検索語の一覧（検索欄の下に出すポップアップの中） -->
+    <Style x:Key="RecentSearchListStyle" TargetType="ListBox">
+        <Setter Property="Background" Value="{DynamicResource PopupBackgroundBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="0,2" />
+        <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+        <Setter Property="ItemContainerStyle">
+            <Setter.Value>
+                <Style TargetType="ListBoxItem">
+                    <Setter Property="Padding" Value="8,4" />
+                    <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="ListBoxItem">
+                                <Border x:Name="Bd" Background="Transparent" Padding="{TemplateBinding Padding}">
+                                    <ContentPresenter />
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="Bd" Property="Background" Value="{DynamicResource RowHoverBrush}" />
+                                    </Trigger>
+                                    <Trigger Property="IsSelected" Value="True">
+                                        <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SelectionBrush}" />
+                                        <Setter Property="Foreground" Value="{DynamicResource SelectionTextBrush}" />
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- 一覧を日付でまとめたときの見出し（「今日」「昨日」など）。Name は見出しの文字、ItemCount は件数 -->
+    <DataTemplate x:Key="DateGroupHeaderTemplate">
+        <Border Background="{DynamicResource HeaderBackgroundBrush}" BorderBrush="{DynamicResource GridLineBrush}"
+                BorderThickness="0,0,0,1" Padding="10,4">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" />
+                <TextBlock Margin="8,0,0,0" Foreground="{DynamicResource SubTextBrush}"
+                           Text="{Binding ItemCount, StringFormat={}{0} 件}" />
+            </StackPanel>
+        </Border>
+    </DataTemplate>
+
+    <!-- フォルダで絞り込んでいるときの帯（一覧の上） -->
+    <Style x:Key="FolderFilterBarStyle" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="Padding" Value="10,4,4,4" />
+        <Setter Property="Margin" Value="0,0,0,8" />
     </Style>
 
     <Style x:Key="PlaceholderTextStyle" TargetType="TextBlock">

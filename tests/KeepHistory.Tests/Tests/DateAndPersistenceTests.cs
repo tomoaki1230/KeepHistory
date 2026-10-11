@@ -167,15 +167,6 @@ public sealed class DateAndPersistenceTests : IDisposable
     }
 
     [Test]
-    public void SettingsExists_IsFalseOnFirstRun()
-    {
-        var data = new DataStore(_dir.Path);
-        Assert.False(data.SettingsExists, "settings.json が無ければ初回起動");
-        data.SaveSettings(data.LoadSettings());
-        Assert.True(data.SettingsExists, "一度保存したら初回ではない");
-    }
-
-    [Test]
     public void StayResident_RoundTrips()
     {
         var data = new DataStore(_dir.Path);

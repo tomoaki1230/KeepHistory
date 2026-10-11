@@ -1,7 +1,7 @@
 <Window x:Class="KeepHistory.Views.DeletedHistoryWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="削除した履歴を元に戻す"
+        Title="外した履歴を戻す"
         Width="720" Height="440" MinWidth="480" MinHeight="280"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
         Background="{DynamicResource WindowBackgroundBrush}"
@@ -9,7 +9,7 @@
         FocusManager.FocusedElement="{Binding ElementName=DeletedGrid}">
     <DockPanel Margin="16">
         <TextBlock DockPanel.Dock="Top" Style="{StaticResource SubTextStyle}" Margin="0,0,0,8"
-                   Text="履歴から削除したファイルです。選んで「元に戻す」を押すと、履歴の一覧に戻ります（すぐに反映され、キャンセルはできません）。" />
+                   Text="一覧から外したファイルです（パソコンのファイルは削除していません）。選んで「元に戻す」を押すと、一覧に戻ります（すぐに反映され、キャンセルはできません）。" />
         <DockPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
             <Button x:Name="CloseButton" DockPanel.Dock="Right" Content="閉じる" IsCancel="True"
                     Style="{StaticResource DialogButtonStyle}" />
@@ -18,7 +18,7 @@
             <TextBlock x:Name="ResultText" VerticalAlignment="Center" Style="{StaticResource SubTextStyle}" />
         </DockPanel>
         <Grid>
-            <DataGrid x:Name="DeletedGrid" AutomationProperties.Name="削除した履歴" Style="{StaticResource HistoryGridStyle}"
+            <DataGrid x:Name="DeletedGrid" AutomationProperties.Name="外した履歴" Style="{StaticResource HistoryGridStyle}"
                       CellStyle="{StaticResource HistoryCellStyle}"
                       AutoGenerateColumns="False" IsReadOnly="True"
                       SelectionMode="Extended" SelectionUnit="FullRow"
@@ -28,11 +28,11 @@
                                         ElementStyle="{StaticResource CellTextStyle}" />
                     <DataGridTextColumn Header="フォルダ" Binding="{Binding FolderPath}" Width="*"
                                         ElementStyle="{StaticResource CellTextStyle}" />
-                    <DataGridTextColumn Header="削除日時" Binding="{Binding DeletedAtText}" SortMemberPath="DeletedAt"
+                    <DataGridTextColumn Header="外した日時" Binding="{Binding DeletedAtText}" SortMemberPath="DeletedAt"
                                         Width="130" ElementStyle="{StaticResource CellTextStyle}" />
                 </DataGrid.Columns>
             </DataGrid>
-            <TextBlock x:Name="EmptyText" Text="削除した履歴はありません。" HorizontalAlignment="Center"
+            <TextBlock x:Name="EmptyText" Text="外した履歴はありません。" HorizontalAlignment="Center"
                        VerticalAlignment="Center" Style="{StaticResource SubTextStyle}" Visibility="Collapsed" />
         </Grid>
     </DockPanel>

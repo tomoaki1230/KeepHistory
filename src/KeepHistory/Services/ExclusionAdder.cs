@@ -26,7 +26,7 @@ public static class ExclusionAdder
     public static string BuildConfirmMessage(string description, string pattern, int removed)
         => $"{description}を記録しないようにします。\n\n"
            + $"除外パターン: {pattern}\n"
-           + (removed > 0 ? $"今ある履歴のうち {removed} 件を一覧から削除します（キープした履歴は残ります）。\n" : "今ある履歴で削除されるものはありません。\n")
+           + (removed > 0 ? $"今ある履歴のうち {removed} 件を一覧から外します（キープした履歴は残ります。パソコンのファイルは削除しません）。\n" : "今ある履歴で一覧から外れるものはありません。\n")
            + "\n元に戻すときは「ツール ＞ 設定」の除外パターンから削除してください。\n\nよろしいですか？";
 
     /// <summary>

@@ -21,8 +21,8 @@ public sealed class AppController : IDisposable
 {
     private static readonly TimeSpan WatchDebounce = TimeSpan.FromMilliseconds(600);
 
-    /// <summary>読めなかった設定・履歴の読み直しと、止まった監視の始め直しを試す間隔。</summary>
-    private static readonly TimeSpan RecoveryInterval = TimeSpan.FromSeconds(30);
+    /// <summary>読めなかった設定・履歴の読み直しと、止まった監視の始め直しを試す間隔（切断が続く間は空けていく）。</summary>
+    private readonly RecoveryBackoff _recoveryBackoff = new();
 
     private readonly Application _app;
     private readonly DataStore _data;
@@ -38,9 +38,10 @@ public sealed class AppController : IDisposable
     private bool _fullRescanPending;
     private bool _scanRunning;
 
-    // 起動時に history.json / deleted.json を一時的に読めなかった（ネットワークの切断など）。
-    // 読めるようになるまで保存しない（空に近い内容で上書きすると、保存してあった履歴・キープが消えるため）
-    private bool _historyLoadFailed;
+    // 履歴の読み込み・保存（起動時に読めなければ、読めるまで保存しない。3.9）
+    private readonly HistoryPersistence _history;
+    private RecentSearchPersistence? _searches;
+
     private bool _recovering;
 
     private AppSettings _settings = new();
@@ -60,9 +61,10 @@ public sealed class AppController : IDisposable
         _settingsStorage = new SettingsStorage(_data);
         _scanner = new RecentFolderScanner(RecentFolderScanner.DefaultFolder, new ShellLinkResolver());
         _watcher = new RecentFolderWatcher(_scanner.Folder);
+        _history = new HistoryPersistence(_data, _store);
         _debounceTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = WatchDebounce };
         _debounceTimer.Tick += OnDebounceTick;
-        _recoveryTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = RecoveryInterval };
+        _recoveryTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = _recoveryBackoff.Current };
         _recoveryTimer.Tick += OnRecoveryTick;
     }
 
@@ -82,17 +84,35 @@ public sealed class AppController : IDisposable
         ThemeManager.Apply(_app, _settings.Theme);
         if (firstRun)
         {
-            // 初回起動: 常駐するかを確かめて、すぐに保存する（次回からは聞かない）
-            _settings.StayResident = AskStayResident(_settings.Hotkey);
+            // 初回起動: Windows の起動時に起動するかを確かめ、すぐに保存する（次回からは聞かない）。
+            // 起動するなら常駐もする（起動時に起動して常駐しないと、サインインのたびに画面が開いてしまうため）
+            var startWithWindows = AskStartWithWindows(_settings.Hotkey);
+            _settings.StayResident = startWithWindows;
             SaveSettings(confirmed: true);
+            if (startWithWindows) ApplyStartupRegistration(true);
         }
         ApplySettingsToStore();
         RepairStartupRegistration();
-        LoadHistoryAtStartup();
+        // 起動時に起動する登録があるのに常駐しない設定（以前の版で選べた）なら、常駐する設定に直す
+        if (_settings.EnsureResidentWhenStartingWithWindows(IsStartupRegistered()))
+        {
+            ErrorLog.Write("Windows の起動時に起動する設定のため、常駐する設定に直しました。");
+            SaveSettings();
+        }
+        _history.LoadAtStartup();
         _store.Purge(DateTime.Now);
 
-        _vm = new MainViewModel(_store, () => DateTime.Now);
+        _vm = new MainViewModel(_store, () => DateTime.Now)
+        {
+            GroupByDate = _settings.GroupByDate,
+            HideMissingFiles = _settings.HideMissingFiles,
+        };
+        // 表示メニューで切り替えたら、設定に入れて保存する
+        _vm.PropertyChanged += OnViewOptionChanged;
         _vm.HistoryChanged += (_, _) => SaveHistory();
+        _searches = new RecentSearchPersistence(_data, _vm.RecentSearches);
+        _searches.Load();
+        _vm.RecentSearches.Changed += (_, _) => _searches.Save();
 
         _window = new MainWindow(_vm) { Icon = AppIcon.GetImageSource() };
         _window.ApplyLayout(_settings);
@@ -300,6 +320,7 @@ public sealed class AppController : IDisposable
         var startupChanged = result.StartWithWindows != _settings.StartWithWindows;
         _settings = result;
         if (_window != null) _window.Placement = _settings.Placement;
+        ApplyViewOptions();
         ThemeManager.Apply(_app, _settings.Theme);
         ApplySettingsToStore();
         ApplyResidentMode();
@@ -335,12 +356,12 @@ public sealed class AppController : IDisposable
         return result == MessageBoxResult.OK;
     }
 
-    /// <summary>初回起動時の確認。「常駐する」なら true（× で閉じたら常駐しない）。</summary>
-    private static bool AskStayResident(HotkeySetting hotkey)
+    /// <summary>初回起動時の確認。「起動時に起動する」なら true（× や Esc で閉じたら起動しない）。</summary>
+    private static bool AskStartWithWindows(HotkeySetting hotkey)
     {
         var dialog = new FirstRunWindow(hotkey) { Icon = AppIcon.GetImageSource() };
         dialog.ShowDialog();
-        return dialog.StayResident;
+        return dialog.StartWithWindows;
     }
 
     /// <summary>設定画面から開く「削除した履歴を元に戻す」。戻したら保存して一覧に反映し、.lnk を読み直す。</summary>
@@ -362,9 +383,10 @@ public sealed class AppController : IDisposable
     /// </summary>
     private void ResetAllData()
     {
-        var failures = AppDataReset.Run(_settingsStorage, _data, _store);
+        var failures = AppDataReset.Run(_settingsStorage, _data, _store, _vm?.RecentSearches);
+        _searches?.ForgetLoadFailure();
         // 初期状態に戻したので、読めなかった履歴を後で読み直してまとめることはしない
-        _historyLoadFailed = false;
+        _history.ForgetLoadFailure();
         _vm?.NotifyStoreChanged();
         _resetRequested = true;
         if (failures.Count > 0)
@@ -387,6 +409,7 @@ public sealed class AppController : IDisposable
         _settings = new AppSettings();
         _window?.ResetLayout();
         if (_window != null) _window.Placement = _settings.Placement;
+        ApplyViewOptions();
         ThemeManager.Apply(_app, _settings.Theme);
         ApplyStartupRegistration(false);
         ApplySettingsToStore();
@@ -404,7 +427,9 @@ public sealed class AppController : IDisposable
         dialog = new SettingsWindow(current,
             openDeletedHistory: () => OpenDeletedHistory(dialog!),
             resetAll: ResetAllData,
-            previewRemoval: s => _store.CountRemovals(new ExclusionFilter(s.ExcludePatterns), s.RetentionDays, DateTime.Now))
+            previewRemoval: s => _store.CountRemovals(new ExclusionFilter(s.ExcludePatterns), s.RetentionDays, DateTime.Now),
+            clearRecentSearches: () => _vm?.RecentSearches.Clear(),
+            recentSearchCount: _vm?.RecentSearches.Items.Count ?? 0)
         { Icon = AppIcon.GetImageSource() };
         if (_window != null && _window.IsVisible)
         {
@@ -478,25 +503,6 @@ public sealed class AppController : IDisposable
         _store.Exclusion = new ExclusionFilter(_settings.ExcludePatterns);
     }
 
-    /// <summary>
-    /// 起動時に履歴を読む。一時的に読めなければ空で始め、読めるまで保存しない（OnRecoveryTick で読み直してまとめる）。
-    /// history.json と deleted.json は両方読めたときだけ使う（片方だけだと、後でまとめるときに重なる）。
-    /// </summary>
-    private void LoadHistoryAtStartup()
-    {
-        try
-        {
-            var history = _data.LoadHistory();
-            var deleted = _data.LoadDeleted();
-            _store.Load(history, deleted);
-        }
-        catch (DataUnavailableException ex)
-        {
-            _historyLoadFailed = true;
-            ErrorLog.Write("履歴を一時的に読み込めないため、空の状態で起動します。読み込めるまで履歴は保存しません。", ex);
-        }
-    }
-
     /// <summary>監視を始める。フォルダがネットワーク上だと確かめるのに時間がかかることがあるので、バックグラウンドで。</summary>
     private async Task StartWatcherAsync()
     {
@@ -513,11 +519,17 @@ public sealed class AppController : IDisposable
     private async void OnRecoveryTick(object? sender, EventArgs e)
     {
         if (_recovering || _disposed) return;
+        // ふだん（直すものが無い）は、覚えている印を見るだけで、ファイルにもネットワークにも触れない
+        if (!NeedsRecovery())
+        {
+            SetRecoveryInterval(reset: true);
+            return;
+        }
         _recovering = true;
         try
         {
             if (_settingsStorage.LoadFailed) await RecoverSettingsAsync();
-            if (_historyLoadFailed) await RecoverHistoryAsync();
+            if (_history.LoadFailed) await RecoverHistoryAsync();
             if (!_watcher.IsRunning && await Task.Run(_watcher.Restart) && !_disposed)
             {
                 ErrorLog.Write("最近使った項目の監視を始め直しました。");
@@ -533,6 +545,18 @@ public sealed class AppController : IDisposable
         {
             _recovering = false;
         }
+        // まだ直らなければ、次に試すまでの間隔を空けていく（30 秒 → … → 5 分）。直ったら 30 秒に戻す
+        if (!_disposed) SetRecoveryInterval(reset: !NeedsRecovery());
+    }
+
+    /// <summary>読み直し・始め直しが必要か（覚えている印だけを見る。ファイルやネットワークには触れない）。</summary>
+    private bool NeedsRecovery() => _settingsStorage.LoadFailed || _history.LoadFailed || !_watcher.IsRunning;
+
+    private void SetRecoveryInterval(bool reset)
+    {
+        if (reset) _recoveryBackoff.Reset();
+        else _recoveryBackoff.Failed();
+        if (_recoveryTimer.Interval != _recoveryBackoff.Current) _recoveryTimer.Interval = _recoveryBackoff.Current;
     }
 
     private async Task RecoverSettingsAsync()
@@ -554,6 +578,7 @@ public sealed class AppController : IDisposable
 
         _settings = loaded;
         _window?.ApplyLayout(_settings);
+        ApplyViewOptions();
         ThemeManager.Apply(_app, _settings.Theme);
         ApplySettingsToStore();
         ApplyResidentMode();
@@ -572,20 +597,14 @@ public sealed class AppController : IDisposable
         List<DeletedRecord> deleted;
         try
         {
-            (history, deleted) = await Task.Run(() => (_data.LoadHistory(), _data.LoadDeleted()));
+            (history, deleted) = await Task.Run(_history.ReadForRecovery);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return;
         }
-        // 待っている間に「すべて初期状態に戻す」をした、なら読んだ内容は使わない
-        if (_disposed || !_historyLoadFailed) return;
-        _store.MergeLoaded(history, deleted);
-        _historyLoadFailed = false;
-        ErrorLog.Write("履歴を読み込めるようになりました。この起動中の記録とまとめて保存します。");
-        _store.RemoveExcluded();
-        _store.Purge(DateTime.Now);
-        SaveHistory();
+        // 待っている間に「すべて初期状態に戻す」をした、なら ApplyRecovered は何もしない
+        if (_disposed || !_history.ApplyRecovered(history, deleted, DateTime.Now)) return;
         RefreshMissing();
         _vm?.NotifyStoreChanged();
     }
@@ -634,6 +653,11 @@ public sealed class AppController : IDisposable
     // FileSystemWatcher のスレッドから呼ばれる
     private void OnRescanRequired()
     {
+        _app.Dispatcher.BeginInvoke(new Action(() =>
+        {
+            // 監視が新しく止まった（ネットワークの切断など）なら、始め直しを試す間隔を最初（30 秒）に戻す
+            if (!_disposed && !_watcher.IsRunning) SetRecoveryInterval(reset: true);
+        }));
         _app.Dispatcher.BeginInvoke(new Action(() => _ = RunFullScanAsync()));
     }
 
@@ -684,20 +708,19 @@ public sealed class AppController : IDisposable
         }
     }
 
-    private void SaveHistory()
+    /// <summary>設定の「表示」の値（日付でまとめる・見つからないファイルを出さない）を一覧に反映する。</summary>
+    private void ApplyViewOptions()
     {
-        // 起動時に読めなかった履歴は、読めるまで上書きしない（OnRecoveryTick で読み直してまとめてから保存する）
-        if (_historyLoadFailed) return;
-        try
-        {
-            _data.SaveHistory(_store.ToHistoryRecords());
-            _data.SaveDeleted(_store.ToDeletedRecords());
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            ErrorLog.Write("履歴を保存できませんでした。", ex);
-        }
+        if (_vm != null) ViewOptions.Apply(_settings, _vm);
     }
+
+    /// <summary>表示メニューで切り替えた。設定に入れて保存する（設定と同じ値なら何もしない）。</summary>
+    private void OnViewOptionChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (_vm != null && ViewOptions.TryTake(_vm, _settings, e)) SaveSettings();
+    }
+
+    private void SaveHistory() => _history.Save();
 
     /// <param name="confirmed">利用者が設定を確定したとき true（初期状態に戻した後の自動保存の停止を解く）。</param>
     private void SaveSettings(bool confirmed = false)

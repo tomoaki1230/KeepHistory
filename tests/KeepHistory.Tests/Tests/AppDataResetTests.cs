@@ -51,6 +51,26 @@ public sealed class AppDataResetTests : IDisposable
     }
 
     [Test]
+    public void Run_AlsoDeletesRecentSearches_FileAndMemory()
+    {
+        var data = new DataStore(_dir.Path);
+        var searches = new RecentSearchList();
+        searches.Remember("見積");
+        data.SaveRecentSearches(searches.ToList());
+        File.WriteAllText(data.RecentSearchesPath + ".tmp", "書きかけ");
+        var saveRequests = 0;
+        searches.Changed += (_, _) => saveRequests++;
+
+        var failures = AppDataReset.Run(new SettingsStorage(data), data, new HistoryStore(), searches);
+
+        Assert.Equal(0, failures.Count);
+        Assert.False(File.Exists(data.RecentSearchesPath), "searches.json（検索語の履歴）も消す");
+        Assert.False(File.Exists(data.RecentSearchesPath + ".tmp"));
+        Assert.Equal(0, searches.Items.Count, "メモリ上の検索語も空にする");
+        Assert.Equal(0, saveRequests, "消した後に保存し直さない");
+    }
+
+    [Test]
     public void Run_WhenHistoryFileIsLocked_ReportsFailure_AndStillResetsTheRest()
     {
         var data = new DataStore(_dir.Path);

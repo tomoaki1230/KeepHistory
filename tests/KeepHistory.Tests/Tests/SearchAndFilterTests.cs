@@ -1,3 +1,4 @@
+using System.Linq;
 using System;
 using KeepHistory.Models;
 using KeepHistory.Services;
@@ -50,6 +51,16 @@ public sealed class SearchAndFilterTests
         var today = new FilterCriteria { Period = PeriodOption.Today };
         Assert.True(today.Matches(recentXlsx, Now));
         Assert.False(today.Matches(noExt, Now));
+
+        // 昨日: 昨日の 0 時から今日の 0 時の前まで（今日の分・一昨日の分は入れない）
+        var yesterday = new FilterCriteria { Period = PeriodOption.Yesterday };
+        HistoryEntry At(DateTime t) => new(@"C:\y.txt", t);
+        Assert.True(yesterday.Matches(At(Now.Date.AddDays(-1)), Now), "昨日の 0 時ちょうどは入る");
+        Assert.True(yesterday.Matches(At(Now.Date.AddTicks(-1)), Now), "昨日の終わりは入る");
+        Assert.False(yesterday.Matches(At(Now.Date), Now), "今日の 0 時からは入れない");
+        Assert.False(yesterday.Matches(At(Now.Date.AddDays(-1).AddTicks(-1)), Now), "一昨日は入れない");
+        Assert.SequenceEqual(new[] { "すべての期間", "今日", "昨日", "過去 7 日", "過去 30 日", "過去 90 日", "過去 1 年" },
+            PeriodOptions.Choices.Select(c => c.Label), "「昨日」は「今日」のすぐ下");
 
         var kept = new FilterCriteria { KeptOnly = true };
         Assert.True(kept.Matches(oldDocx, Now));

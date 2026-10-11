@@ -4,7 +4,10 @@ using KeepHistory.Models;
 
 namespace KeepHistory.Views;
 
-/// <summary>初回起動時に、通知領域に常駐するかを確かめる。× で閉じたら常駐しない（既定）。</summary>
+/// <summary>
+/// 初回起動時に、Windows の起動時に起動するか（起動するなら通知領域にも常駐する）を確かめる。
+/// × や Esc で閉じたら起動しない（既定のボタンは「起動時に起動する」）。
+/// </summary>
 public partial class FirstRunWindow : Window
 {
     public FirstRunWindow(HotkeySetting hotkey)
@@ -13,26 +16,26 @@ public partial class FirstRunWindow : Window
         BenefitList.ItemsSource = BenefitsFor(hotkey);
     }
 
-    /// <summary>常駐するメリット。</summary>
+    /// <summary>起動時に起動して常駐するメリット。</summary>
     public static IReadOnlyList<string> BenefitsFor(HotkeySetting hotkey) => new[]
     {
-        $"ホットキー（{hotkey.ToDisplayString()}）で、どのアプリを使っていてもすぐに呼び出せます。",
+        $"サインインした直後から、ホットキー（{hotkey.ToDisplayString()}）でいつでも呼び出せます。",
+        "開いたファイルを漏れなく記録できるので、履歴と「回数」が正確になります。",
         "画面を閉じても終了しないので、次に開くときに待たされません。",
-        "ファイルを開くたびにその場で記録するので、「回数」が正確になります。",
     };
 
-    /// <summary>常駐するを選んだら true。</summary>
-    public bool StayResident { get; private set; }
+    /// <summary>「起動時に起動する」を選んだら true（常駐もする）。</summary>
+    public bool StartWithWindows { get; private set; }
 
-    private void OnStayResidentClick(object sender, RoutedEventArgs e)
+    private void OnStartWithWindowsClick(object sender, RoutedEventArgs e)
     {
-        StayResident = true;
+        StartWithWindows = true;
         DialogResult = true;
     }
 
-    private void OnNotResidentClick(object sender, RoutedEventArgs e)
+    private void OnDoNotStartClick(object sender, RoutedEventArgs e)
     {
-        StayResident = false;
+        StartWithWindows = false;
         DialogResult = false;
     }
 }

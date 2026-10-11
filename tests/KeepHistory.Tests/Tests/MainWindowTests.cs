@@ -34,7 +34,8 @@ public sealed class MainWindowTests : IDisposable
         _store.Register(@"C:\Docs\budget.xlsx", Now.AddHours(-1), Now);
         _store.Register(@"C:\Old\gone.txt", Now.AddHours(-2), Now);
         _vm = new MainViewModel(_store, () => Now);
-        _window = new MainWindow(_vm) { ShowActivated = true };
+        // 実際のキーボードの状態（テスト中に押された Shift など）に左右されないよう、修飾キーは「何も押していない」にする
+        _window = new MainWindow(_vm) { ShowActivated = true, CurrentModifiers = () => ModifierKeys.None };
         _window.Closed += (_, _) => _closed = true;
     }
 
@@ -294,21 +295,16 @@ public sealed class MainWindowTests : IDisposable
     {
         ShowWindow();
         var top = _window.MainMenu.Items.OfType<MenuItem>().Select(m => m.Header as string).ToList();
-        Assert.SequenceEqual(new[] { "ツール(_T)", "ヘルプ(_H)" }, top, "メニューバーはツールとヘルプ");
+        Assert.SequenceEqual(new[] { "表示(_V)", "ツール(_T)", "ヘルプ(_H)" }, top, "メニューバーは表示・ツール・ヘルプ（Windows のアプリと同じ順）");
+        Assert.SequenceEqual(new[] { "一覧を日付でまとめる(_G)", "削除済みのローカルファイルを表示しない(_M)", "ネットワーク上のファイルを表示しない(_N)" },
+            _window.ViewMenu.Items.OfType<MenuItem>().Select(m => m.Header as string));
         Assert.SequenceEqual(new[] { "設定(_O)..." }, _window.ToolsMenu.Items.OfType<MenuItem>().Select(m => m.Header as string));
         Assert.SequenceEqual(new[] { "サードパーティーのライセンス(_L)", "バージョン情報(_A)" },
             _window.HelpMenu.Items.OfType<MenuItem>().Select(m => m.Header as string));
         Assert.True(_window.MainMenu.TranslatePoint(new Point(0, 0), _window.SearchBox).Y < 0, "メニューバーは検索行より上");
-    }
-
-    [Test]
-    public void SearchRow_NoLongerHasSettingsOrHelpButtons()
-    {
-        ShowWindow();
         var searchRow = Assert.NotNull(FindAncestorOf<DockPanel>(_window.KeptOnlyToggle));
-        var buttons = searchRow.Children.OfType<Button>().ToList();
-        Assert.Equal(1, buttons.Count, "検索行のボタンは更新だけ（設定・ヘルプはメニューバー）");
-        Assert.Same(_window.RefreshButton, buttons[0]);
+        Assert.SequenceEqual(new[] { _window.RefreshButton }, searchRow.Children.OfType<Button>(),
+            "検索行のボタンは更新だけ（設定・ヘルプはメニューバー）");
     }
 
     /// <summary>文字の実際に描かれる部分（インク）の高さ。フォントの行の高さではなく見た目の大きさを比べるため。</summary>
@@ -394,11 +390,11 @@ public sealed class MainWindowTests : IDisposable
             Assert.Same(_window, about.Owner, "履歴画面の上に出す");
             var version = typeof(MainWindow).Assembly.GetName().Version!;
             Assert.Equal("バージョン " + version.ToString(3), about.VersionText.Text, "アプリのバージョン（csproj の Version）");
-            Assert.Equal("1.1.2", AboutWindow.AppVersion);
+            Assert.Equal("1.2.0", AboutWindow.AppVersion);
             Assert.Equal("KeepHistory", about.ProductText.Text);
             Assert.Equal("作成者: Tomoaki Bessho", about.AuthorText.Text, "作成者を表示");
             Assert.Equal("Tomoaki Bessho", AboutWindow.Author, "csproj の作成者から読む");
-            Assert.Contains(".NET 8", about.RuntimeText.Text);
+            Assert.Contains(".NET 10", about.RuntimeText.Text, "動いている .NET の版を出す");
             Assert.NotNull(about.AppImage.Source, "アイコンを表示");
         }
         finally
@@ -688,31 +684,504 @@ public sealed class MainWindowTests : IDisposable
     }
 
     [Test]
-    public void ClearSearchButton_DoesNotDisturbKeyboardFlow_AndHasANameToReadAloud()
+    public void SearchBoxButtons_DoNotTakeFocus_AndHaveNamesToReadAloud()
     {
         ShowWindow();
+        _vm.RecentSearches.Remember("budget");
         _vm.SearchText = "budget";
         UiTestHost.DoEvents();
-        var button = _window.ClearSearchButton;
-        Assert.False(button.Focusable, "押してもフォーカスを奪わない");
-        Assert.False(button.IsTabStop, "Tab で止まらない（検索欄 → ↓ で一覧、の流れを崩さない）");
-        Assert.Equal("検索語を消す", System.Windows.Automation.AutomationProperties.GetName(button), "読み上げ名");
-        Assert.Equal("検索語を消す", button.ToolTip as string);
+        foreach (var (button, name) in new[] { (_window.ClearSearchButton, "検索語を消す"), (_window.RecentSearchButton, "最近の検索語") })
+        {
+            Assert.False(button.Focusable, $"{name}: 押してもフォーカスを奪わない");
+            Assert.False(button.IsTabStop, $"{name}: Tab で止まらない（検索欄 → ↓ で一覧、の流れを崩さない）");
+            Assert.Equal(name, System.Windows.Automation.AutomationProperties.GetName(button), "読み上げ名");
+        }
+        Assert.Equal("検索語を消す", _window.ClearSearchButton.ToolTip as string);
+    }
+
+    // ---- 1.2.0: Ctrl+Enter でフォルダを開く ----
+
+    private List<string> RecordReveals()
+    {
+        var revealed = new List<string>();
+        _window.RevealInExplorer = path =>
+        {
+            revealed.Add(path);
+            return Task.CompletedTask;
+        };
+        _window.OpenFolderOnly = path =>
+        {
+            revealed.Add("folder:" + path);
+            return Task.CompletedTask;
+        };
+        return revealed;
     }
 
     [Test]
-    public void ClearSearchButton_SitsInsideTheSearchBox_AndTextDoesNotGoUnderIt()
+    public void CtrlEnter_OpensTheFolder_FromTheListAndTheSearchBox()
     {
         ShowWindow();
+        var (_, opened) = RecordDialogsAndOpens();
+        var revealed = RecordReveals();
+        var entry = _store.Find(@"C:\Docs\budget.xlsx")!;
+        SelectAndFocusRow(entry);
+
+        Assert.True(_window.HandleGridKey(Key.Enter, ModifierKeys.Control));
+        UiTestHost.DoEvents();
+        Assert.SequenceEqual(new[] { entry.Path }, revealed, "一覧で Ctrl+Enter: エクスプローラーでファイルを選んだ状態で開く");
+        Assert.Equal(0, opened.Count, "ファイルは開かない");
+
+        _vm.SearchText = "report";
+        UiTestHost.DoEvents();
+        Assert.True(_window.HandleSearchBoxKey(Key.Enter, ModifierKeys.Control));
+        UiTestHost.DoEvents();
+        Assert.Equal(@"C:\Docs\report-2026.docx", revealed[1], "検索欄で Ctrl+Enter: いちばん上の行のフォルダ");
+        Assert.Equal(0, opened.Count);
+
+        _window.HandleSearchBoxKey(Key.Enter, ModifierKeys.None);
+        UiTestHost.DoEvents();
+        Assert.Equal(1, opened.Count, "Enter だけなら従来どおりファイルを開く");
+    }
+
+    [Test]
+    public void OpenFolderMenu_ShowsTheShortcut()
+    {
+        var items = _window.HistoryGrid.ContextMenu!.Items.OfType<MenuItem>().ToList();
+        Assert.Equal("Ctrl+Enter", items.Single(i => (string)i.Header == "フォルダを開く").InputGestureText);
+        Assert.Contains("Ctrl+Enter", _window.KeyHintText.Text, "画面下のキーの案内にも出す");
+        Assert.Contains("Ctrl+Z", _window.KeyHintText.Text);
+        Assert.Contains("Delete: 一覧から外す", _window.KeyHintText.Text, "Delete は「削除」ではなく「一覧から外す」と案内する");
+        var remove = items.Single(i => (string)i.Header == "一覧から外す");
+        Assert.Equal("Delete", remove.InputGestureText);
+        Assert.Contains("パソコンのファイルは削除しません", remove.ToolTip as string, "ファイルは消えないと伝える");
+        Assert.False(items.Any(i => (i.Header as string)?.Contains("削除") == true), "右クリックのメニューに「削除」という言葉を使わない");
+    }
+
+    // ---- 1.2.0: 削除の取り消し（Ctrl+Z） ----
+
+    [Test]
+    public void CtrlZ_RestoresTheDeletedRow_AndSelectsIt()
+    {
+        ShowWindow();
+        var entry = _store.Find(@"C:\Docs\budget.xlsx")!;
+        entry.IsKept = true;
+        SelectAndFocusRow(entry);
+        Assert.True(_window.HandleGridKey(Key.Delete, ModifierKeys.None));
+        UiTestHost.DoEvents();
+        Assert.Null(_store.Find(entry.Path), "前提: 削除した");
+        Assert.Contains("一覧から外しました: budget.xlsx", _window.StatusMessageText.Text, "「削除」ではなく「一覧から外す」と言う");
+        Assert.Contains("ファイルはそのままです", _window.StatusMessageText.Text, "パソコンのファイルは消えていないと伝える");
+        Assert.Contains("Ctrl+Z で戻せます", _window.StatusMessageText.Text, "取り消せることを知らせる");
+        Assert.Same(Application.Current.FindResource("SubTextBrush"), _window.StatusMessageText.Foreground, "知らせは赤字にしない");
+
+        Assert.True(_window.HandleGridKey(Key.Z, ModifierKeys.Control));
+        UiTestHost.DoEvents();
+        var restored = _store.Find(entry.Path);
+        Assert.NotNull(restored, "Ctrl+Z で一覧に戻る");
+        Assert.True(restored!.IsKept, "キープも元どおり");
+        Assert.Same(restored, _window.HistoryGrid.SelectedItem, "戻した行を選ぶ");
+        Assert.True(_window.HistoryGrid.IsKeyboardFocusWithin, "続けてキーボードで操作できる");
+        Assert.Equal(MainWindow.RestoredMessagePrefix + "budget.xlsx", _window.StatusMessageText.Text);
+
+        _window.HandleGridKey(Key.Z, ModifierKeys.Control);
+        UiTestHost.DoEvents();
+        Assert.Equal(MainWindow.NothingToUndoMessage, _window.StatusMessageText.Text, "戻せるものが無ければそう知らせる");
+    }
+
+    [Test]
+    public void CtrlZ_InTheSearchBox_IsLeftToTheTextBox()
+    {
+        ShowWindow();
+        SelectAndFocusRow(_store.Find(@"C:\Docs\budget.xlsx")!);
+        _window.HandleGridKey(Key.Delete, ModifierKeys.None);
+        UiTestHost.DoEvents();
+        Assert.False(_window.HandleUndoKey(Key.Z, ModifierKeys.Control, _window.SearchBox), "検索欄では文字の「元に戻す」を優先する");
+        Assert.Null(_store.Find(@"C:\Docs\budget.xlsx"));
+        Assert.True(_window.HandleUndoKey(Key.Z, ModifierKeys.Control, _window.RefreshButton), "ボタンなどにフォーカスがあれば取り消す");
+        Assert.NotNull(_store.Find(@"C:\Docs\budget.xlsx"));
+        Assert.False(_window.HandleUndoKey(Key.Z, ModifierKeys.None, _window.RefreshButton), "Z だけでは何もしない");
+    }
+
+    // ---- 1.2.0: このフォルダのファイルを表示 ----
+
+    [Test]
+    public void ShowFolderFiles_FiltersByFolder_AndCanBeCleared()
+    {
+        ShowWindow();
+        Assert.Equal(Visibility.Collapsed, _window.FolderFilterBar.Visibility, "ふだんは帯を出さない");
+        var entry = _store.Find(@"C:\Docs\budget.xlsx")!;
+        SelectAndFocusRow(entry);
+        Assert.NotNull(_window.HistoryGrid.ContextMenu!.Items.OfType<MenuItem>().SingleOrDefault(i => (string)i.Header == "このフォルダのファイルを表示"),
+            "右クリックのメニューにある");
+
+        _window.ShowFolderFiles(entry);
+        UiTestHost.DoEvents();
+        Assert.SequenceEqual(new[] { @"C:\Docs\budget.xlsx", @"C:\Docs\report-2026.docx" },
+            _window.HistoryGrid.Items.Cast<HistoryEntry>().Select(e => e.Path), "同じフォルダのファイルだけ");
+        Assert.Equal(Visibility.Visible, _window.FolderFilterBar.Visibility, "絞り込んでいることを帯で知らせる");
+        Assert.Contains(@"C:\Docs", _window.FolderFilterText.Text);
+        Assert.Same(entry, _window.HistoryGrid.SelectedItem, "選んでいた行は選んだまま");
+        Assert.Equal("フォルダの絞り込みを解除", System.Windows.Automation.AutomationProperties.GetName(_window.ClearFolderFilterButton));
+
+        _window.ClearFolderFilter();
+        UiTestHost.DoEvents();
+        Assert.Equal(3, _window.HistoryGrid.Items.Count, "解除したらすべて出す");
+        Assert.Equal(Visibility.Collapsed, _window.FolderFilterBar.Visibility);
+        Assert.Same(entry, _window.HistoryGrid.SelectedItem, "解除しても選んでいた行のまま");
+    }
+
+    // ---- 1.2.0: 最近の検索語 ----
+
+    [Test]
+    public void OpeningAFileWhileSearching_RemembersTheSearch()
+    {
+        ShowWindow();
+        RecordDialogsAndOpens();
+        RecordReveals();
+        Assert.Equal(Visibility.Visible, _window.RecentSearchButton.Visibility, "▾ は常に出す（出たり消えたりしない）");
+        Assert.False(_window.RecentSearchButton.IsEnabled, "覚えている語が無ければ押せない");
+        _vm.SearchText = "budget";
+        UiTestHost.DoEvents();
+        _window.HandleSearchBoxKey(Key.Enter, ModifierKeys.None);
+        _vm.SearchText = "report";
+        UiTestHost.DoEvents();
+        _window.HandleSearchBoxKey(Key.Enter, ModifierKeys.Control);
+        UiTestHost.DoEvents();
+        Assert.SequenceEqual(new[] { "report", "budget" }, _vm.RecentSearches.Items, "ファイル・フォルダを開いたときの検索語を新しい順に覚える");
+        Assert.True(_window.RecentSearchButton.IsEnabled, "覚えたら押せる");
+    }
+
+    [Test]
+    public void RecentSearches_CanBePickedWithAltDown()
+    {
+        ShowWindow();
+        Assert.False(_window.HandleSearchBoxKey(Key.Down, ModifierKeys.Alt), "覚えている語が無ければ何もしない");
+        _vm.RecentSearches.Remember("budget");
+        _vm.RecentSearches.Remember("report");
+        UiTestHost.DoEvents();
+
+        Assert.True(_window.HandleSearchBoxKey(Key.Down, ModifierKeys.Alt));
+        UiTestHost.DoEvents();
+        Assert.True(_window.RecentSearchPopup.IsOpen, "Alt+↓ で一覧を出す");
+        Assert.Equal("report", _window.RecentSearchList.SelectedItem as string, "いちばん新しい語を選んだ状態");
+
+        // Esc は一覧だけを閉じる（画面は閉じない）
+        var esc = new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(_window.RecentSearchList)!, 0, Key.Escape)
+        {
+            RoutedEvent = Keyboard.PreviewKeyDownEvent,
+        };
+        _window.RecentSearchList.RaiseEvent(esc);
+        UiTestHost.DoEvents();
+        Assert.True(esc.Handled);
+        Assert.False(_window.RecentSearchPopup.IsOpen);
+        Assert.True(_window.IsVisible, "画面は閉じない");
+
+        // 一覧の下の「履歴を消す」にフォーカスがあるときの Esc も、一覧だけを閉じる
+        _window.OpenRecentSearches();
+        UiTestHost.DoEvents();
+        var escOnClear = new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(_window.ClearRecentSearchesInListButton)!, 0, Key.Escape)
+        {
+            RoutedEvent = Keyboard.PreviewKeyDownEvent,
+        };
+        _window.ClearRecentSearchesInListButton.RaiseEvent(escOnClear);
+        UiTestHost.DoEvents();
+        Assert.True(escOnClear.Handled && !_window.RecentSearchPopup.IsOpen && _window.IsVisible, "「履歴を消す」の上の Esc も一覧だけ閉じる");
+        Assert.Equal(2, _vm.RecentSearches.Items.Count, "Esc では消さない");
+
+        // ↓ で 2 番目の語に移って Enter（キー操作で選ぶ）
+        _window.OpenRecentSearches();
+        UiTestHost.DoEvents();
+        _window.RecentSearchList.SelectedIndex = 1;
+        var enter = new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(_window.RecentSearchList)!, 0, Key.Enter)
+        {
+            RoutedEvent = Keyboard.PreviewKeyDownEvent,
+        };
+        _window.RecentSearchList.RaiseEvent(enter);
+        UiTestHost.DoEvents();
+        Assert.False(_window.RecentSearchPopup.IsOpen);
+        Assert.Equal("budget", _vm.SearchText, "選んだ語で検索する");
+        Assert.Equal(1, _window.HistoryGrid.Items.Count);
+        Assert.True(_window.SearchBox.IsKeyboardFocused, "続けて入力できるよう検索欄に戻る");
+        Assert.Equal(_window.SearchBox.Text.Length, _window.SearchBox.CaretIndex, "文字の最後から入力できる");
+    }
+
+    [Test]
+    public void SearchBoxButtons_SitInsideTheBox_AndDoNotHideTheText()
+    {
+        ShowWindow();
+        _vm.RecentSearches.Remember("budget");
         _vm.SearchText = "budget";
         UiTestHost.DoEvents();
         var box = _window.SearchBox;
-        var button = _window.ClearSearchButton;
-        var buttonBox = button.TransformToVisual(box).TransformBounds(new Rect(0, 0, button.ActualWidth, button.ActualHeight));
-        Assert.True(buttonBox.Left >= 0 && buttonBox.Right <= box.ActualWidth && buttonBox.Top >= 0 && buttonBox.Bottom <= box.ActualHeight,
-            $"検索欄の中に収まる（{buttonBox} / {box.ActualWidth}×{box.ActualHeight}）");
-        Assert.True(box.ActualWidth - buttonBox.Right < 8, "右端に置く");
-        Assert.True(box.Padding.Right >= box.ActualWidth - buttonBox.Left, $"文字の右の余白（{box.Padding.Right}）が「×」の幅以上なので、長い検索語が隠れない");
+        Rect BoundsOf(FrameworkElement e) => e.TransformToVisual(box).TransformBounds(new Rect(0, 0, e.ActualWidth, e.ActualHeight));
+        var clear = BoundsOf(_window.ClearSearchButton);
+        var dropDown = BoundsOf(_window.RecentSearchButton);
+        Assert.True(clear.Left >= 0 && clear.Top >= 0 && clear.Bottom <= box.ActualHeight, $"「×」は検索欄の中に収まる（{clear}）");
+        Assert.True(dropDown.Left - clear.Right >= 0 && dropDown.Left - clear.Right < 8, "「×」は「▾」のすぐ左");
+        Assert.True(box.ActualWidth - dropDown.Right <= 2, "「▾」は検索欄の右端（プルダウンと同じ位置）");
+        Assert.True(dropDown.Top <= 2 && box.ActualHeight - dropDown.Bottom <= 2, "「▾」は検索欄の高さいっぱい（区切り線で入力部分と分ける）");
+        Assert.True(box.Padding.Right >= box.ActualWidth - clear.Left, $"文字の右の余白（{box.Padding.Right}）が「×」と「▾」の幅以上なので、長い検索語が隠れない");
+    }
+
+    [Test]
+    public void DropDown_IsAlwaysThere_AndExplainsWhenThereIsNothingToShow()
+    {
+        ShowWindow();
+        var button = _window.RecentSearchButton;
+        Assert.Equal(Visibility.Visible, button.Visibility, "検索語の有無にかかわらず出す");
+        Assert.False(button.IsEnabled);
+        Assert.Equal("最近の検索語はまだありません", button.ToolTip as string, "押せない理由をツールチップで伝える");
+        Assert.True(ToolTipService.GetShowOnDisabled(button), "押せないときもツールチップを出す");
+
+        _vm.RecentSearches.Remember("budget");
+        UiTestHost.DoEvents();
+        Assert.True(button.IsEnabled);
+        Assert.Equal("最近の検索語（Alt+↓）", button.ToolTip as string, "キーボードでの出し方も伝える");
+        var peer = new System.Windows.Automation.Peers.ButtonAutomationPeer(button);
+        ((System.Windows.Automation.Provider.IInvokeProvider)peer.GetPattern(System.Windows.Automation.Peers.PatternInterface.Invoke)).Invoke();
+        UiTestHost.DoEvents();
+        Assert.True(_window.RecentSearchPopup.IsOpen, "押すと一覧を出す");
+        _window.RecentSearchPopup.IsOpen = false;
+    }
+
+    [Test]
+    public void ClearHistoryInTheList_ForgetsAllSearches_AndReturnsToTheSearchBox()
+    {
+        ShowWindow();
+        _vm.RecentSearches.Remember("budget");
+        _vm.RecentSearches.Remember("report");
+        var saveRequests = 0;
+        _vm.RecentSearches.Changed += (_, _) => saveRequests++;
+        _window.OpenRecentSearches();
+        UiTestHost.DoEvents();
+        Assert.Equal("履歴を消す", _window.ClearRecentSearchesInListButton.Content as string, "一覧のいちばん下にある");
+        Assert.Equal("検索語の履歴を消す", System.Windows.Automation.AutomationProperties.GetName(_window.ClearRecentSearchesInListButton));
+
+        _window.ClearRecentSearchesFromList();
+        UiTestHost.DoEvents();
+        Assert.Equal(0, _vm.RecentSearches.Items.Count, "その場ですべて消す");
+        Assert.Equal(1, saveRequests, "消したことを保存する");
+        Assert.False(_window.RecentSearchPopup.IsOpen, "一覧を閉じる");
+        Assert.True(_window.SearchBox.IsKeyboardFocused, "検索欄に戻る");
+        Assert.False(_window.RecentSearchButton.IsEnabled, "消した後は ▾ を押せない");
+    }
+
+    [Test]
+    public void EnterRightAfterTyping_UsesTheNewSearch_EvenWhenSearchIsDeferred()
+    {
+        ShowWindow();
+        _vm.DeferSearchThreshold = 1;
+        var (_, opened) = RecordDialogsAndOpens();
+        _window.SearchBox.Text = "report";
+        Assert.True(_vm.IsSearchPending, "前提: 入力が止まるのを待っている");
+        Assert.True(_window.HandleSearchBoxKey(Key.Enter, ModifierKeys.None));
+        UiTestHost.DoEvents();
+        Assert.SequenceEqual(new[] { @"C:\Docs\report-2026.docx" }, opened, "待たずに絞り込んでから開く（古い一覧のいちばん上を開かない）");
+    }
+
+    // ---- 1.2.0: ファイルの種類のアイコン ----
+
+    [Test]
+    public void FileNameColumn_ShowsTheFileTypeIcon_FadedWhenMissing()
+    {
+        ShowWindow();
+        var missing = _store.Find(@"C:\Old\gone.txt")!;
+        missing.IsMissing = true;
+        UiTestHost.DoEvents();
+        foreach (var entry in _store.Entries)
+        {
+            var row = (DataGridRow)_window.HistoryGrid.ItemContainerGenerator.ContainerFromItem(entry);
+            var icon = Assert.NotNull(FindVisual<Image>(row, i => i.Name == "FileIcon"), $"{entry.FileName} にアイコンがある");
+            Assert.NotNull(icon.Source, "拡張子からアイコンを出す");
+            Assert.True(icon.Width == 16 && icon.Height == 16);
+            Assert.Equal(entry.IsMissing ? 0.45 : 1.0, icon.Opacity, $"{entry.FileName}: 見つからないファイルはアイコンも淡く");
+        }
+    }
+
+    // ---- 1.2.0: 日付でまとめる ----
+
+    [Test]
+    public void GroupByDate_ShowsHeadings_AndKeyboardStillWorks()
+    {
+        _store.Register(@"C:\Docs\last-month.txt", Now.AddDays(-45), Now);
+        _vm.NotifyStoreChanged();
+        _vm.GroupByDate = true;
+        ShowWindow();
+        var headers = new List<string>();
+        void Collect(DependencyObject node)
+        {
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++)
+            {
+                var child = VisualTreeHelper.GetChild(node, i);
+                if (child is GroupItem { DataContext: System.Windows.Data.CollectionViewGroup group }) headers.Add($"{group.Name}:{group.ItemCount}");
+                Collect(child);
+            }
+        }
+        Collect(_window.HistoryGrid);
+        Assert.SequenceEqual(new[] { "今日:3", "それより前:1" }, headers, "見出しと件数が出る");
+
+        // 検索欄から ↓ で最初の行へ、Enter で開ける（見出しは選ばれない）
+        var (_, opened) = RecordDialogsAndOpens();
+        Assert.Null(_window.HistoryGrid.SelectedItem, "まとめても、勝手に行を選ばない（検索欄の Enter がいちばん上を開くように）");
+        _window.FocusSearchBox();
+        _window.HandleSearchBoxKey(Key.Down, ModifierKeys.None);
+        UiTestHost.DoEvents();
+        Assert.Equal(@"C:\Docs\budget.xlsx", (_window.HistoryGrid.SelectedItem as HistoryEntry)?.Path);
+        Assert.True(_window.HistoryGrid.IsKeyboardFocusWithin);
+        _window.HandleGridKey(Key.Enter, ModifierKeys.None);
+        UiTestHost.DoEvents();
+        Assert.Equal(1, opened.Count);
+
+        _vm.GroupByDate = false;
+        UiTestHost.DoEvents();
+        headers.Clear();
+        Collect(_window.HistoryGrid);
+        Assert.Equal(0, headers.Count, "オフなら見出しを出さない");
+    }
+
+    [Test]
+    public void Title_ShowsTheSelectedFileName()
+    {
+        ShowWindow();
+        Assert.Equal("KeepHistory", _window.Title, "選んでいないときはアプリ名だけ（「最近使ったファイル」は出さない）");
+        var entry = _store.Find(@"C:\Docs\budget.xlsx")!;
+        SelectAndFocusRow(entry);
+        Assert.Equal("KeepHistory - budget.xlsx", _window.Title, "行を選んだらファイル名を出す");
+        _window.HandleGridKey(Key.Down, ModifierKeys.None);
+        _window.HistoryGrid.SelectedItem = _store.Find(@"C:\Old\gone.txt");
+        Assert.Equal("KeepHistory - gone.txt", _window.Title, "選び直したら変わる");
+
+        _vm.SearchText = "report";
+        UiTestHost.DoEvents();
+        Assert.Null(_window.HistoryGrid.SelectedItem, "前提: 絞り込みで選んでいた行が消えた");
+        Assert.Equal("KeepHistory", _window.Title, "選択が外れたらアプリ名だけに戻る");
+
+        _vm.SearchText = string.Empty;
+        UiTestHost.DoEvents();
+        SelectAndFocusRow(entry);
+        _window.HandleGridKey(Key.Delete, ModifierKeys.None);
+        UiTestHost.DoEvents();
+        Assert.Equal($"KeepHistory - {((HistoryEntry)_window.HistoryGrid.SelectedItem!).FileName}", _window.Title,
+            "削除した後は、選び直した行の名前になる");
+    }
+
+    [Test]
+    public void ViewMenu_TogglesGroupingAndHidingMissingFiles()
+    {
+        ShowWindow();
+        var group = _window.GroupByDateMenuItem;
+        var hide = _window.HideMissingFilesMenuItem;
+        Assert.True(group.IsCheckable && hide.IsCheckable, "チェックで切り替える項目");
+        Assert.False(group.IsChecked, "一覧の状態に合わせて表示する（このテストの一覧はまとめていない）");
+
+        group.IsChecked = true;
+        UiTestHost.DoEvents();
+        Assert.True(_vm.GroupByDate && _vm.IsGroupedByDate, "チェックするとその場で日付でまとめる");
+        _vm.GroupByDate = false;
+        UiTestHost.DoEvents();
+        Assert.False(group.IsChecked, "設定画面などで変わったらメニューのチェックも変わる");
+
+        var missing = _store.Find(@"C:\Old\gone.txt")!;
+        missing.IsMissing = true;
+        _vm.NotifyStoreChanged();
+        UiTestHost.DoEvents();
+        Assert.Equal(3, _window.HistoryGrid.Items.Count, "前提: ふだんは見つからないファイルも淡く出す");
+        hide.IsChecked = true;
+        UiTestHost.DoEvents();
+        Assert.True(_vm.HideMissingFiles);
+        Assert.False(_window.HistoryGrid.Items.Contains(missing), "チェックすると見つからないファイルを出さない");
+        Assert.Equal(2, _window.HistoryGrid.Items.Count);
+        Assert.NotNull(_store.Find(missing.Path), "履歴からは消さない（表示しないだけ）");
+        Assert.Contains("表示 2 件 / 全 3 件", _window.StatusText.Text, "件数の表示も合わせる");
+        hide.IsChecked = false;
+        UiTestHost.DoEvents();
+        Assert.Equal(3, _window.HistoryGrid.Items.Count, "外すとまた出す");
+
+        // ネットワーク上のファイル（ここでは C:\Docs をネットワーク扱いにする）
+        _vm.NetworkPathCheckerFactory = () => path => path.StartsWith(@"C:\Docs", StringComparison.OrdinalIgnoreCase);
+        var network = _window.HideNetworkFilesMenuItem;
+        Assert.True(network.IsCheckable && !network.IsChecked, "既定は出す");
+        network.IsChecked = true;
+        UiTestHost.DoEvents();
+        Assert.True(_vm.HideNetworkFiles);
+        Assert.SequenceEqual(new[] { @"C:\Old\gone.txt" }, _window.HistoryGrid.Items.Cast<HistoryEntry>().Select(e => e.Path),
+            "チェックするとネットワーク上のファイルを出さない");
+        Assert.Equal(3, _store.Entries.Count, "履歴からは消さない（表示しないだけ）");
+        network.IsChecked = false;
+        UiTestHost.DoEvents();
+        Assert.Equal(3, _window.HistoryGrid.Items.Count, "外すとまた出す");
+    }
+
+    [Test]
+    public void ViewMenu_CheckMarkUsesThemeColor_SoItIsVisibleInDarkMode()
+    {
+        ShowWindow();
+        _window.ViewMenu.IsSubmenuOpen = true;
+        UiTestHost.DoEvents();
+        var item = _window.GroupByDateMenuItem;
+        item.ApplyTemplate();
+        var mark = Assert.NotNull(item.Template.FindName("CheckMark", item) as TextBlock, "チェックで切り替える項目は専用の見た目（標準の印は色が固定でダークで見えない）");
+        item.IsChecked = true;
+        UiTestHost.DoEvents();
+        Assert.Equal(Visibility.Visible, mark.Visibility, "チェックしたら印を出す");
+        Assert.Same(Application.Current.FindResource("AccentBrush"), mark.Foreground, "印はテーマの色（ライト・ダークで切り替わる）");
+        item.IsChecked = false;
+        UiTestHost.DoEvents();
+        Assert.Equal(Visibility.Hidden, mark.Visibility, "外したら印を消す（場所は空けたまま）");
+        _window.ViewMenu.IsSubmenuOpen = false;
+    }
+
+    [Test]
+    public void ExtensionDropDown_HasNoEmptySpaceBelowTheLastItem()
+    {
+        // 種類がたくさんあって、プルダウンをいちばん下までスクロールした
+        for (int i = 0; i < 25; i++) _store.Register($@"C:\Many\f{i}.ext{i:00}", Now.AddMinutes(-i), Now);
+        _vm.NotifyStoreChanged();
+        ShowWindow();
+        var box = _window.ExtensionBox;
+        box.IsDropDownOpen = true;
+        UiTestHost.DoEvents();
+        var popup = (System.Windows.Controls.Primitives.Popup)box.Template.FindName("PART_Popup", box);
+        var viewer = Assert.NotNull(FindVisual<ScrollViewer>(popup.Child, _ => true));
+        Assert.True(viewer.ScrollableHeight > 0, "前提: 項目が多くてスクロールする");
+        viewer.ScrollToEnd();
+        UiTestHost.DoEvents();
+        var last = (FrameworkElement)box.ItemContainerGenerator.ContainerFromIndex(box.Items.Count - 1);
+        var bottom = last.TransformToAncestor(viewer).Transform(new Point(0, last.ActualHeight)).Y;
+        Assert.True(Math.Abs(viewer.ActualHeight - bottom) < 1, $"最後の項目の下に空きが無い（空き {viewer.ActualHeight - bottom:F1} px）");
+        box.IsDropDownOpen = false;
+    }
+
+    [Test]
+    public void Refresh_ClearsTheSelection()
+    {
+        ShowWindow();
+        var requests = 0;
+        _window.RefreshRequested += (_, _) => requests++;
+        foreach (var useKey in new[] { false, true })
+        {
+            SelectAndFocusRow(_store.Find(@"C:\Docs\budget.xlsx")!);
+            Assert.NotNull(_window.HistoryGrid.SelectedItem, "前提: 行を選んでいる");
+            if (useKey)
+            {
+                var f5 = new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(_window)!, 0, Key.F5)
+                {
+                    RoutedEvent = Keyboard.PreviewKeyDownEvent,
+                };
+                _window.HistoryGrid.RaiseEvent(f5);
+            }
+            else
+            {
+                var peer = new System.Windows.Automation.Peers.ButtonAutomationPeer(_window.RefreshButton);
+                ((System.Windows.Automation.Provider.IInvokeProvider)peer.GetPattern(System.Windows.Automation.Peers.PatternInterface.Invoke)).Invoke();
+            }
+            UiTestHost.DoEvents();
+            var how = useKey ? "F5" : "「↻ 更新」ボタン";
+            Assert.Null(_window.HistoryGrid.SelectedItem, $"{how}で選択を外す（未選択の状態にする）");
+            Assert.False(_window.HistoryGrid.CurrentCell.IsValid, $"{how}で現在のセルも外す");
+            Assert.Equal("KeepHistory", _window.Title, $"{how}の後はタイトルもアプリ名だけ");
+        }
+        Assert.Equal(2, requests, "更新は依頼する");
     }
 
     [Test]
@@ -796,6 +1265,9 @@ public sealed class MainWindowTests : IDisposable
         SelectAndFocusRow(_store.Find(@"C:\Docs\budget.xlsx")!);
         PressKey(Key.F5);
         Assert.Equal(2, requested, "一覧で F5");
+        _window.CurrentModifiers = () => ModifierKeys.Shift;
+        PressKey(Key.F5);
+        Assert.Equal(2, requested, "Shift+F5 では更新しない（修飾キーは CurrentModifiers から読む）");
     }
 
     [Test]
@@ -832,7 +1304,8 @@ public sealed class MainWindowTests : IDisposable
 
         var data = Assert.NotNull(copied, "クリップボードに入れる");
         Assert.SequenceEqual(new[] { @"C:\Docs\budget.xlsx" }, data.GetFileDropList().Cast<string>(), "エクスプローラーに貼り付けられる形（FileDrop）");
-        var effect = (System.IO.MemoryStream)data.GetData("Preferred DropEffect");
+        // .NET 10 では、取り出した値が null の可能性があると示されるので、null でないことも確かめる
+        var effect = Assert.NotNull(data.GetData("Preferred DropEffect") as System.IO.MemoryStream, "貼り付け時の動き（コピー）を入れてある");
         Assert.Equal((int)DragDropEffects.Copy, BitConverter.ToInt32(effect.ToArray(), 0), "貼り付けは移動ではなくコピー");
     }
 

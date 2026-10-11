@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:KeepHistory.Views"
-        Title="KeepHistory - 最近使ったファイル"
+        Title="{x:Static local:MainWindow.DefaultTitle}"
         Width="960" Height="600" MinWidth="520" MinHeight="300"
         WindowStartupLocation="Manual"
         Background="{DynamicResource WindowBackgroundBrush}"
@@ -15,6 +15,18 @@
     <!-- メニューバー -->
     <Menu x:Name="MainMenu" DockPanel.Dock="Top" Background="{DynamicResource SurfaceBrush}"
           BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="4,2">
+        <!-- 表示（一覧の見せ方。チェックを付け外しすると、その場で反映して設定に保存する） -->
+        <MenuItem x:Name="ViewMenu" Header="表示(_V)">
+            <MenuItem x:Name="GroupByDateMenuItem" Header="一覧を日付でまとめる(_G)" IsCheckable="True"
+                      IsChecked="{Binding GroupByDate}"
+                      ToolTip="前回利用日時で並べているとき、「今日」「昨日」「今週」などの見出しで区切ります" />
+            <MenuItem x:Name="HideMissingFilesMenuItem" Header="削除済みのローカルファイルを表示しない(_M)" IsCheckable="True"
+                      IsChecked="{Binding HideMissingFiles}"
+                      ToolTip="削除・移動などで見つからないファイル（薄い色の行）を一覧に出しません。ネットワーク上のファイルは対象外です（履歴からは消しません）" />
+            <MenuItem x:Name="HideNetworkFilesMenuItem" Header="ネットワーク上のファイルを表示しない(_N)" IsCheckable="True"
+                      IsChecked="{Binding HideNetworkFiles}"
+                      ToolTip="共有フォルダ（\\サーバー\…）や、割り当てたネットワークドライブのファイルを一覧に出しません（履歴からは消しません）" />
+        </MenuItem>
         <MenuItem x:Name="ToolsMenu" Header="ツール(_T)">
             <MenuItem x:Name="SettingsMenuItem" Header="設定(_O)..." Click="OnSettingsClick" />
         </MenuItem>
@@ -28,6 +40,7 @@
 
     <Grid Margin="12">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
@@ -59,9 +72,9 @@
                       ItemsSource="{Binding ExtensionChoices}" SelectedItem="{Binding SelectedExtension}"
                       DisplayMemberPath="Label" Style="{StaticResource ToolbarComboStyle}" />
             <Grid>
-                <!-- 右の余白（30）は「×」（ClearSearchButtonSize 24 + 余白）に文字が隠れないため -->
+                <!-- 右の余白（56）は「×」（ClearSearchButtonSize 24 + 余白 3）と「▾」（SearchDropDownButtonWidth 26 + 枠 1）に文字が隠れないため -->
                 <TextBox x:Name="SearchBox" AutomationProperties.Name="ファイル名・パスで検索" Style="{StaticResource SearchBoxStyle}"
-                         Padding="6,0,30,0"
+                         Padding="6,0,56,0"
                          Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
                          PreviewKeyDown="OnSearchBoxPreviewKeyDown" />
                 <TextBlock Text="ファイル名・パスで検索（スペース区切りで AND）">
@@ -76,23 +89,75 @@
                         </Style>
                     </TextBlock.Style>
                 </TextBlock>
-                <!-- 検索語を消す（検索語があるときだけ出す） -->
-                <Button x:Name="ClearSearchButton" Click="OnClearSearchClick">
-                    <Button.Style>
-                        <Style TargetType="Button" BasedOn="{StaticResource ClearSearchButtonStyle}">
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding Text.Length, ElementName=SearchBox}" Value="0">
-                                    <Setter Property="Visibility" Value="Collapsed" />
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </Button.Style>
-                </Button>
+                <!-- 検索欄の右端のボタン。右端が「▾」（最近の検索語。常に出す）、その左が「×」（検索語があるとき） -->
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <!-- 検索語を消す（検索語があるときだけ出す） -->
+                    <Button x:Name="ClearSearchButton" Click="OnClearSearchClick">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource ClearSearchButtonStyle}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Text.Length, ElementName=SearchBox}" Value="0">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                    <!-- 最近の検索語（覚えている語が無ければ押せない） -->
+                    <Button x:Name="RecentSearchButton" Click="OnRecentSearchClick">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource SearchDropDownButtonStyle}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding RecentSearches.Items.Count}" Value="0">
+                                        <Setter Property="IsEnabled" Value="False" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                </StackPanel>
+                <!-- 最近の検索語（検索欄の下に出す。選ぶとその語で検索する。いちばん下に「履歴を消す」） -->
+                <Popup x:Name="RecentSearchPopup" PlacementTarget="{Binding ElementName=SearchBox}" Placement="Bottom"
+                       StaysOpen="False" AllowsTransparency="False"
+                       Width="{Binding ActualWidth, ElementName=SearchBox}">
+                    <Border Background="{DynamicResource PopupBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                        <DockPanel>
+                            <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource GridLineBrush}" BorderThickness="0,1,0,0" Padding="2">
+                                <Button x:Name="ClearRecentSearchesInListButton" Content="履歴を消す"
+                                        AutomationProperties.Name="検索語の履歴を消す" ToolTip="覚えている検索語をすべて消します"
+                                        Style="{StaticResource PopupLinkButtonStyle}" Click="OnClearRecentSearchesInListClick"
+                                        PreviewKeyDown="OnRecentSearchListPreviewKeyDown" />
+                            </Border>
+                            <ListBox x:Name="RecentSearchList" AutomationProperties.Name="最近の検索語の一覧"
+                                     Style="{StaticResource RecentSearchListStyle}" MaxHeight="260"
+                                     ItemsSource="{Binding RecentSearches.Items}"
+                                     PreviewKeyDown="OnRecentSearchListPreviewKeyDown"
+                                     PreviewMouseLeftButtonUp="OnRecentSearchListMouseUp" />
+                        </DockPanel>
+                    </Border>
+                </Popup>
             </Grid>
         </DockPanel>
 
-        <!-- 一覧。並び替えは列見出しのクリックのみ -->
-        <DataGrid x:Name="HistoryGrid" AutomationProperties.Name="履歴の一覧" Grid.Row="1"
+        <!-- フォルダで絞り込んでいるとき（右クリックの「このフォルダのファイルを表示」）の帯 -->
+        <Border x:Name="FolderFilterBar" Grid.Row="1" Style="{StaticResource FolderFilterBarStyle}">
+            <Border.Visibility>
+                <Binding Path="FolderFilterText" Converter="{StaticResource NullToCollapsedConverter}" />
+            </Border.Visibility>
+            <DockPanel>
+                <Button x:Name="ClearFolderFilterButton" DockPanel.Dock="Right" Content="解除" AutomationProperties.Name="フォルダの絞り込みを解除"
+                        Height="24" Padding="12,0" Style="{StaticResource ToolbarButtonStyle}" Click="OnClearFolderFilterClick" />
+                <TextBlock x:Name="FolderFilterText" Text="{Binding FolderFilterText}" VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" Style="{StaticResource BaseTextStyle}"
+                           ToolTip="{Binding FolderFilter}" />
+            </DockPanel>
+        </Border>
+
+        <!--
+          一覧。並び替えは列見出しのクリックのみ。前回利用日時で並べているときは日付でまとめる（設定）。
+          選択は一覧の「現在の項目」に合わせない（合わせると、まとめ直したときに勝手に行が選ばれ、検索欄の Enter がその行を開いてしまう）
+        -->
+        <DataGrid x:Name="HistoryGrid" AutomationProperties.Name="履歴の一覧" Grid.Row="2"
                   Style="{StaticResource HistoryGridStyle}"
                   RowStyle="{StaticResource HistoryRowStyle}"
                   CellStyle="{StaticResource HistoryCellStyle}"
@@ -101,17 +166,23 @@
                   SelectionMode="Single" SelectionUnit="FullRow"
                   CanUserSortColumns="True" CanUserReorderColumns="True" CanUserResizeColumns="True"
                   EnableRowVirtualization="True"
+                  VirtualizingPanel.IsVirtualizingWhenGrouping="True"
+                  IsSynchronizedWithCurrentItem="False"
                   MouseDoubleClick="OnGridMouseDoubleClick"
                   PreviewMouseLeftButtonDown="OnGridPreviewMouseLeftButtonDown"
                   PreviewMouseMove="OnGridPreviewMouseMove"
                   PreviewMouseLeftButtonUp="OnGridPreviewMouseLeftButtonUp"
                   PreviewKeyDown="OnGridPreviewKeyDown"
                   SelectionChanged="OnGridSelectionChanged">
+            <DataGrid.GroupStyle>
+                <GroupStyle HeaderTemplate="{StaticResource DateGroupHeaderTemplate}" />
+            </DataGrid.GroupStyle>
             <DataGrid.ContextMenu>
                 <ContextMenu Opened="OnContextMenuOpened">
                     <MenuItem Header="開く" InputGestureText="Enter" FontWeight="Bold" Click="OnOpenClick" />
                     <MenuItem x:Name="OpenWithMenuItem" Header="プログラムから開く..." Click="OnOpenWithClick" />
-                    <MenuItem Header="フォルダを開く" Click="OnOpenFolderClick" />
+                    <MenuItem Header="フォルダを開く" InputGestureText="Ctrl+Enter" Click="OnOpenFolderClick" />
+                    <MenuItem x:Name="ShowFolderFilesMenuItem" Header="このフォルダのファイルを表示" Click="OnShowFolderFilesClick" />
                     <Separator />
                     <MenuItem x:Name="CopyFileMenuItem" Header="ファイルをコピー" Click="OnCopyFileClick" />
                     <MenuItem Header="パスをコピー" InputGestureText="Ctrl+C" Click="OnCopyPathClick" />
@@ -123,7 +194,9 @@
                     <Separator />
                     <MenuItem Header="★ キープの切り替え" InputGestureText="Ctrl+K" Click="OnToggleKeepClick" />
                     <Separator />
-                    <MenuItem Header="履歴から削除" InputGestureText="Delete" Click="OnDeleteClick" />
+                    <!-- 「削除」だとファイルが消えると誤解されやすいので「一覧から外す」と言う（ファイルには触れない） -->
+                    <MenuItem x:Name="RemoveFromListMenuItem" Header="一覧から外す" InputGestureText="Delete" Click="OnDeleteClick"
+                              ToolTip="一覧から外すだけで、パソコンのファイルは削除しません（Ctrl+Z で戻せます）" />
                 </ContextMenu>
             </DataGrid.ContextMenu>
             <DataGrid.Columns>
@@ -139,9 +212,21 @@
                 <DataGridTemplateColumn Header="ファイル名" SortMemberPath="FileName" Width="260">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
-                            <TextBlock Style="{StaticResource CellTextStyle}"
-                                       local:SearchHighlight.Text="{Binding FileName}"
-                                       local:SearchHighlight.Terms="{Binding DataContext.HighlightTerms, RelativeSource={RelativeSource AncestorType=DataGrid}}" />
+                            <!-- 先頭にファイルの種類のアイコン（拡張子から求める。ファイルにはアクセスしない） -->
+                            <DockPanel>
+                                <Image x:Name="FileIcon" DockPanel.Dock="Left" Width="16" Height="16" Margin="6,0,0,0"
+                                       VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality"
+                                       Source="{Binding Extension, Converter={StaticResource FileIconConverter}}" />
+                                <TextBlock Style="{StaticResource CellTextStyle}"
+                                           local:SearchHighlight.Text="{Binding FileName}"
+                                           local:SearchHighlight.Terms="{Binding DataContext.HighlightTerms, RelativeSource={RelativeSource AncestorType=DataGrid}}" />
+                            </DockPanel>
+                            <DataTemplate.Triggers>
+                                <!-- 見つからないファイルは、文字と同じくアイコンも淡くする -->
+                                <DataTrigger Binding="{Binding IsMissing}" Value="True">
+                                    <Setter TargetName="FileIcon" Property="Opacity" Value="0.45" />
+                                </DataTrigger>
+                            </DataTemplate.Triggers>
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
@@ -162,7 +247,7 @@
         </DataGrid>
 
         <!-- 一覧が空のときの案内（履歴が無い／絞り込みで 0 件） -->
-        <TextBlock x:Name="EmptyMessageText" Grid.Row="1" Text="{Binding EmptyMessage}"
+        <TextBlock x:Name="EmptyMessageText" Grid.Row="2" Text="{Binding EmptyMessage}"
                    HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center"
                    IsHitTestVisible="False" Style="{StaticResource SubTextStyle}" FontSize="13">
             <TextBlock.Visibility>
@@ -170,9 +255,9 @@
             </TextBlock.Visibility>
         </TextBlock>
 
-        <DockPanel Grid.Row="2" Margin="0,8,0,0">
-            <TextBlock DockPanel.Dock="Right" Style="{StaticResource SubTextStyle}"
-                       Text="Enter: 開く　Ctrl+K: キープ　Delete: 履歴から削除　Esc: 閉じる" />
+        <DockPanel Grid.Row="3" Margin="0,8,0,0">
+            <TextBlock x:Name="KeyHintText" DockPanel.Dock="Right" Style="{StaticResource SubTextStyle}"
+                       Text="Enter: 開く　Ctrl+Enter: フォルダ　Ctrl+K: キープ　Delete: 一覧から外す　Ctrl+Z: 元に戻す　Esc: 閉じる" />
             <TextBlock x:Name="StatusText" DockPanel.Dock="Left" Style="{StaticResource SubTextStyle}" Text="{Binding StatusText}" />
             <!-- 開こうとしたファイルが見つからないときなどのメッセージ（赤字）。ダイアログを出さずキーボード操作を続けられるように -->
             <TextBlock x:Name="StatusMessageText" Margin="16,0,12,0" FontSize="11.5"

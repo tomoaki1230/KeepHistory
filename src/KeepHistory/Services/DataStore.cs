@@ -29,6 +29,7 @@ public sealed class DataStore
     public const string HistoryFileName = "history.json";
     public const string DeletedFileName = "deleted.json";
     public const string SettingsFileName = "settings.json";
+    public const string RecentSearchesFileName = "searches.json";
 
     private static readonly JsonSerializerOptions Options = new()
     {
@@ -47,6 +48,7 @@ public sealed class DataStore
     public string HistoryPath => Path.Combine(Directory, HistoryFileName);
     public string DeletedPath => Path.Combine(Directory, DeletedFileName);
     public string SettingsPath => Path.Combine(Directory, SettingsFileName);
+    public string RecentSearchesPath => Path.Combine(Directory, RecentSearchesFileName);
 
     /// <summary>ほかのソフトがつかんでいるときに読み直す回数と間隔（テストで差し替える）。</summary>
     internal static int ReadAttempts { get; set; } = 3;
@@ -62,9 +64,6 @@ public sealed class DataStore
 
     public void SaveDeleted(List<DeletedRecord> records) => Save(DeletedPath, records);
 
-    /// <summary>settings.json があるか（無ければ初回起動）。</summary>
-    public bool SettingsExists => File.Exists(SettingsPath);
-
     /// <exception cref="DataUnavailableException">一時的に読めない。</exception>
     public AppSettings LoadSettings() => (Load<AppSettings>(SettingsPath) ?? new AppSettings()).Normalize();
 
@@ -79,6 +78,19 @@ public sealed class DataStore
     }
 
     public void SaveSettings(AppSettings settings) => Save(SettingsPath, settings);
+
+    /// <summary>最近の検索語（新しい順）。無ければ空。</summary>
+    /// <exception cref="DataUnavailableException">一時的に読めない。</exception>
+    public List<string> LoadRecentSearches() => Load<List<string>>(RecentSearchesPath) ?? new();
+
+    public void SaveRecentSearches(List<string> terms) => Save(RecentSearchesPath, terms);
+
+    /// <summary>searches.json を削除する（書きかけの一時ファイルも）。</summary>
+    public void DeleteRecentSearches()
+    {
+        File.Delete(RecentSearchesPath);
+        File.Delete(RecentSearchesPath + ".tmp");
+    }
 
     /// <summary>history.json と deleted.json を削除する（書きかけの一時ファイルも）。</summary>
     public void DeleteHistory()

@@ -12,7 +12,7 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>disable</ImplicitUsings>
@@ -29,26 +29,120 @@
     <ProjectReference Include="..\..\src\KeepHistory\KeepHistory.csproj" />
   </ItemGroup>
 
+  <!--
+    ビルドの識別子（動きには関係しないメタデータ）。テストの dll を Windows のアプリ制御（Smart App Control）に止められたとき、
+    テストの csproj がこれを変えてビルドし直す（中身の指紋が変わり、判定がやり直される）。ふだんは空で、何も入らない。
+  -->
+  <ItemGroup Condition="'$(KeepHistoryBuildNonce)' != ''">
+    <AssemblyMetadata Include="KeepHistoryBuildNonce" Value="$(KeepHistoryBuildNonce)" />
+  </ItemGroup>
+
   <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
 
   <!--
     dotnet test から呼ばれる。自作ランナーを実行し、終了コードで成否を返す。
     DOTNET_HOST_PATH は dotnet コマンドから MSBuild を動かすと入る、いま動いている dotnet のフルパス（無ければ PATH の dotnet）。
+
+    Windows のアプリ制御（Smart App Control）は、署名の無い dll を中身の指紋ごとに判定し、ときどき読み込みを止める
+    （置き場所を変えても同じ中身なら止められる。2026-10-11 に確認）。アプリの dll を止められるとランナーは終了コード 3 を返し、
+    テストの dll そのものを止められると出力に 0x800711C7 が出る。どちらでも
+    ビルドの識別子（KeepHistoryBuildNonce）を変えてビルドし直し、同じテストをもう一度動かす（最大 5 回）。
+    テストを飛ばすことはしない。5 回とも止められたら失敗にする。
   -->
   <PropertyGroup>
     <KeepHistoryDotnetHost>$(DOTNET_HOST_PATH)</KeepHistoryDotnetHost>
     <KeepHistoryDotnetHost Condition="'$(KeepHistoryDotnetHost)' == ''">dotnet</KeepHistoryDotnetHost>
+    <KeepHistoryTestCommand>&quot;$(KeepHistoryDotnetHost)&quot; &quot;$(TargetDir)$(TargetName).dll&quot; $(KeepHistoryTestFilter)</KeepHistoryTestCommand>
   </PropertyGroup>
 
   <Target Name="VSTest" DependsOnTargets="Build">
-    <Exec Command="&quot;$(KeepHistoryDotnetHost)&quot; &quot;$(TargetDir)$(TargetName).dll&quot; $(KeepHistoryTestFilter)"
-          WorkingDirectory="$(TargetDir)"
-          StandardOutputImportance="high"
-          StandardErrorImportance="high"
-          StdOutEncoding="utf-8"
-          StdErrEncoding="utf-8"
-          IgnoreStandardErrorWarningFormat="true"
-          CustomErrorRegularExpression="^\[失敗\]" />
+    <CallTarget Targets="_KeepHistoryRunTests" />
+  </Target>
+
+  <Target Name="_KeepHistoryRunTests">
+    <!-- 1 回目 -->
+    <Exec Command="$(KeepHistoryTestCommand)" WorkingDirectory="$(TargetDir)" IgnoreExitCode="true" ConsoleToMSBuild="true"
+          StandardOutputImportance="high" StandardErrorImportance="high" StdOutEncoding="utf-8" StdErrEncoding="utf-8" IgnoreStandardErrorWarningFormat="true">
+      <Output TaskParameter="ExitCode" PropertyName="_KhExit" />
+      <Output TaskParameter="ConsoleOutput" ItemName="_KhOutput1" />
+    </Exec>
+    <PropertyGroup>
+      <_KhText>@(_KhOutput1)</_KhText>
+      <!-- テストの dll そのものを止められると、ランナーが動かず「止められた」と返せない（処理されない例外で終わる）ので、出力の 0x800711C7 でも判断する -->
+      <_KhExit Condition="$(_KhText.Contains('0x800711C7'))">3</_KhExit>
+    </PropertyGroup>
+    <!-- 2 回目（前の回で止められたときだけ。識別子を変えてビルドし直してから同じテストを動かす） -->
+    <PropertyGroup>
+      <_KhRun>false</_KhRun>
+      <_KhRun Condition="'$(_KhExit)' == '3'">true</_KhRun>
+    </PropertyGroup>
+    <MSBuild Condition="'$(_KhRun)' == 'true'" Projects="$(MSBuildProjectFullPath)" Targets="Build"
+             Properties="KeepHistoryBuildNonce=$([System.Guid]::NewGuid().ToString('N'))" />
+    <Exec Condition="'$(_KhRun)' == 'true'" Command="$(KeepHistoryTestCommand)" WorkingDirectory="$(TargetDir)" IgnoreExitCode="true" ConsoleToMSBuild="true"
+          StandardOutputImportance="high" StandardErrorImportance="high" StdOutEncoding="utf-8" StdErrEncoding="utf-8" IgnoreStandardErrorWarningFormat="true">
+      <Output TaskParameter="ExitCode" PropertyName="_KhExit" />
+      <Output TaskParameter="ConsoleOutput" ItemName="_KhOutput2" />
+    </Exec>
+    <PropertyGroup Condition="'$(_KhRun)' == 'true'">
+      <_KhText>@(_KhOutput2)</_KhText>
+      <!-- テストの dll そのものを止められると、ランナーが動かず「止められた」と返せない（処理されない例外で終わる）ので、出力の 0x800711C7 でも判断する -->
+      <_KhExit Condition="$(_KhText.Contains('0x800711C7'))">3</_KhExit>
+    </PropertyGroup>
+    <!-- 3 回目（前の回で止められたときだけ。識別子を変えてビルドし直してから同じテストを動かす） -->
+    <PropertyGroup>
+      <_KhRun>false</_KhRun>
+      <_KhRun Condition="'$(_KhExit)' == '3'">true</_KhRun>
+    </PropertyGroup>
+    <MSBuild Condition="'$(_KhRun)' == 'true'" Projects="$(MSBuildProjectFullPath)" Targets="Build"
+             Properties="KeepHistoryBuildNonce=$([System.Guid]::NewGuid().ToString('N'))" />
+    <Exec Condition="'$(_KhRun)' == 'true'" Command="$(KeepHistoryTestCommand)" WorkingDirectory="$(TargetDir)" IgnoreExitCode="true" ConsoleToMSBuild="true"
+          StandardOutputImportance="high" StandardErrorImportance="high" StdOutEncoding="utf-8" StdErrEncoding="utf-8" IgnoreStandardErrorWarningFormat="true">
+      <Output TaskParameter="ExitCode" PropertyName="_KhExit" />
+      <Output TaskParameter="ConsoleOutput" ItemName="_KhOutput3" />
+    </Exec>
+    <PropertyGroup Condition="'$(_KhRun)' == 'true'">
+      <_KhText>@(_KhOutput3)</_KhText>
+      <!-- テストの dll そのものを止められると、ランナーが動かず「止められた」と返せない（処理されない例外で終わる）ので、出力の 0x800711C7 でも判断する -->
+      <_KhExit Condition="$(_KhText.Contains('0x800711C7'))">3</_KhExit>
+    </PropertyGroup>
+    <!-- 4 回目（前の回で止められたときだけ。識別子を変えてビルドし直してから同じテストを動かす） -->
+    <PropertyGroup>
+      <_KhRun>false</_KhRun>
+      <_KhRun Condition="'$(_KhExit)' == '3'">true</_KhRun>
+    </PropertyGroup>
+    <MSBuild Condition="'$(_KhRun)' == 'true'" Projects="$(MSBuildProjectFullPath)" Targets="Build"
+             Properties="KeepHistoryBuildNonce=$([System.Guid]::NewGuid().ToString('N'))" />
+    <Exec Condition="'$(_KhRun)' == 'true'" Command="$(KeepHistoryTestCommand)" WorkingDirectory="$(TargetDir)" IgnoreExitCode="true" ConsoleToMSBuild="true"
+          StandardOutputImportance="high" StandardErrorImportance="high" StdOutEncoding="utf-8" StdErrEncoding="utf-8" IgnoreStandardErrorWarningFormat="true">
+      <Output TaskParameter="ExitCode" PropertyName="_KhExit" />
+      <Output TaskParameter="ConsoleOutput" ItemName="_KhOutput4" />
+    </Exec>
+    <PropertyGroup Condition="'$(_KhRun)' == 'true'">
+      <_KhText>@(_KhOutput4)</_KhText>
+      <!-- テストの dll そのものを止められると、ランナーが動かず「止められた」と返せない（処理されない例外で終わる）ので、出力の 0x800711C7 でも判断する -->
+      <_KhExit Condition="$(_KhText.Contains('0x800711C7'))">3</_KhExit>
+    </PropertyGroup>
+    <!-- 5 回目（前の回で止められたときだけ。識別子を変えてビルドし直してから同じテストを動かす） -->
+    <PropertyGroup>
+      <_KhRun>false</_KhRun>
+      <_KhRun Condition="'$(_KhExit)' == '3'">true</_KhRun>
+    </PropertyGroup>
+    <MSBuild Condition="'$(_KhRun)' == 'true'" Projects="$(MSBuildProjectFullPath)" Targets="Build"
+             Properties="KeepHistoryBuildNonce=$([System.Guid]::NewGuid().ToString('N'))" />
+    <Exec Condition="'$(_KhRun)' == 'true'" Command="$(KeepHistoryTestCommand)" WorkingDirectory="$(TargetDir)" IgnoreExitCode="true" ConsoleToMSBuild="true"
+          StandardOutputImportance="high" StandardErrorImportance="high" StdOutEncoding="utf-8" StdErrEncoding="utf-8" IgnoreStandardErrorWarningFormat="true">
+      <Output TaskParameter="ExitCode" PropertyName="_KhExit" />
+      <Output TaskParameter="ConsoleOutput" ItemName="_KhOutput5" />
+    </Exec>
+    <PropertyGroup Condition="'$(_KhRun)' == 'true'">
+      <_KhText>@(_KhOutput5)</_KhText>
+      <!-- テストの dll そのものを止められると、ランナーが動かず「止められた」と返せない（処理されない例外で終わる）ので、出力の 0x800711C7 でも判断する -->
+      <_KhExit Condition="$(_KhText.Contains('0x800711C7'))">3</_KhExit>
+    </PropertyGroup>
+    <Error Condition="'$(_KhExit)' == '3'"
+           Text="[失敗] Windows のアプリ制御（Smart App Control）に 5 回続けて止められ、テストを実行できませんでした（テストは飛ばしていません。失敗として扱います）。" />
+    <Error Condition="'$(_KhExit)' != '0' and '$(_KhExit)' != '3'"
+           Text="[失敗] テストが失敗しました（終了コード $(_KhExit)）。上の [失敗] の行を見てください。" />
   </Target>
 
 </Project>

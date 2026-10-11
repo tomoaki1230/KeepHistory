@@ -6,12 +6,18 @@
         WindowStartupLocation="CenterScreen" ShowInTaskbar="True" Topmost="True"
         Background="{DynamicResource WindowBackgroundBrush}"
         Foreground="{DynamicResource TextBrush}"
-        FocusManager.FocusedElement="{Binding ElementName=StayResidentButton}">
+        FocusManager.FocusedElement="{Binding ElementName=StartWithWindowsButton}">
+    <!--
+      初回起動の確認。KeepHistory は動いている間に開いたファイルを記録するので、Windows の起動時から常駐しているときに
+      いちばん役に立つ。そのため「起動時に起動するか」を聞き、起動するなら常駐もする（起動時に起動して常駐しないと、
+      サインインのたびに画面が開いてしまうため）
+    -->
     <StackPanel Margin="24,20,24,16">
-        <TextBlock Text="通知領域に常駐しますか？" FontSize="16" FontWeight="SemiBold" Style="{StaticResource BaseTextStyle}" />
+        <TextBlock Text="Windows の起動時に KeepHistory を起動しますか？" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap"
+                   Style="{StaticResource BaseTextStyle}" />
         <TextBlock Margin="0,10,0,6" Style="{StaticResource BaseTextStyle}" TextWrapping="Wrap"
-                   Text="常駐すると、画面を閉じても KeepHistory が通知領域に残り、次のようなメリットがあります。" />
-        <ItemsControl x:Name="BenefitList" AutomationProperties.Name="常駐するメリット" Margin="8,0,0,0">
+                   Text="起動時に起動すると、KeepHistory が通知領域に常駐し、次のようなメリットがあります。" />
+        <ItemsControl x:Name="BenefitList" AutomationProperties.Name="起動時に起動するメリット" Margin="8,0,0,0">
             <ItemsControl.ItemTemplate>
                 <DataTemplate>
                     <BulletDecorator Margin="0,3,0,0">
@@ -23,13 +29,13 @@
                 </DataTemplate>
             </ItemsControl.ItemTemplate>
         </ItemsControl>
-        <TextBlock Margin="0,12,0,0" Style="{StaticResource SubTextStyle}"
-                   Text="常駐しない場合は、画面を閉じるとアプリを終了します。この設定は、あとから「ツール ＞ 設定」でいつでも変更できます。" />
+        <TextBlock Margin="0,12,0,0" Style="{StaticResource SubTextStyle}" TextWrapping="Wrap"
+                   Text="起動しない場合は、使うときに KeepHistory を起動してください（画面を閉じるとアプリを終了します）。この設定は、あとから「ツール ＞ 設定」でいつでも変更できます。" />
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
-            <Button x:Name="StayResidentButton" Content="常駐する" IsDefault="True"
-                    Style="{StaticResource DialogButtonStyle}" Click="OnStayResidentClick" />
-            <Button x:Name="NotResidentButton" Content="常駐しない" IsCancel="True"
-                    Style="{StaticResource DialogButtonStyle}" Click="OnNotResidentClick" />
+            <Button x:Name="StartWithWindowsButton" Content="起動時に起動する（おすすめ）" IsDefault="True"
+                    Style="{StaticResource DialogButtonStyle}" Click="OnStartWithWindowsClick" />
+            <Button x:Name="DoNotStartButton" Content="起動しない" IsCancel="True"
+                    Style="{StaticResource DialogButtonStyle}" Click="OnDoNotStartClick" />
         </StackPanel>
     </StackPanel>
 </Window>

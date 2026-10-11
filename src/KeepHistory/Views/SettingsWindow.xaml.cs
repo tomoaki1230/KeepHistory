@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Windows;
+using System.Windows.Controls;
 using KeepHistory.Interop;
 using KeepHistory.Models;
 using KeepHistory.Services;
@@ -17,6 +18,7 @@ public partial class SettingsWindow : Window
     private readonly Action? _openDeletedHistory;
     private readonly Action? _resetAll;
     private readonly Func<AppSettings, (int Excluded, int Expired)>? _previewRemoval;
+    private readonly Action? _clearRecentSearches;
     private bool _loading = true;
 
     // 入力の誤りがあったタブ（TryBuildResult が入れる）
@@ -26,16 +28,22 @@ public partial class SettingsWindow : Window
     /// <param name="openDeletedHistory">「削除した履歴を元に戻す」画面を開く処理。null ならボタンを使えなくする。</param>
     /// <param name="resetAll">「すべて初期状態に戻す」を確認で OK したときの処理（設定・履歴の削除）。null ならボタンを使えなくする。</param>
     /// <param name="previewRemoval">新しい設定で消える履歴の件数（除外・期限切れ）を数える処理。OK の前の確認に使う。</param>
+    /// <param name="clearRecentSearches">「検索語の履歴を消す」の処理（その場で消す）。null ならボタンを使えなくする。</param>
+    /// <param name="recentSearchCount">覚えている検索語の件数（0 ならボタンを使えなくする）。</param>
     public SettingsWindow(AppSettings current, Func<HotkeySetting, bool>? isHotkeyAvailable = null,
         Action? openDeletedHistory = null, Action? resetAll = null,
-        Func<AppSettings, (int Excluded, int Expired)>? previewRemoval = null)
+        Func<AppSettings, (int Excluded, int Expired)>? previewRemoval = null,
+        Action? clearRecentSearches = null, int recentSearchCount = 0)
     {
         _previewRemoval = previewRemoval;
+        _clearRecentSearches = clearRecentSearches;
         _isHotkeyAvailable = isHotkeyAvailable ?? GlobalHotkey.IsAvailable;
         _openDeletedHistory = openDeletedHistory;
         _resetAll = resetAll;
         InitializeComponent();
         DeletedHistoryButton.IsEnabled = openDeletedHistory != null;
+        ClearRecentSearchesButton.IsEnabled = clearRecentSearches != null && recentSearchCount > 0;
+        RecentSearchCountText.Text = recentSearchCount > 0 ? $"（{recentSearchCount} 件）" : "（ありません）";
         ResetAllButton.IsEnabled = resetAll != null;
         Confirm = message => MessageBox.Show(this, message, "KeepHistory の設定",
             MessageBoxButton.OKCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel) == MessageBoxResult.OK;
@@ -57,7 +65,7 @@ public partial class SettingsWindow : Window
     public const string ResetConfirmMessage =
         "すべてを初期状態に戻します。次のものを削除し、すぐに反映します。\n\n"
         + "・設定（常駐、保持期間、除外パターン、ホットキー、一覧の列の幅・並び、ウインドウサイズ）\n"
-        + "・履歴、キープ、削除した履歴\n\n"
+        + "・履歴、キープ、外した履歴、検索語の履歴\n\n"
         + "削除したものは元に戻せません。\n"
         + "履歴は、初回起動と同じように Windows の「最近使った項目」から読み直します。\n"
         + "次回の起動時には、常駐するかを確かめる画面が表示されます。\n\n"
@@ -72,8 +80,10 @@ public partial class SettingsWindow : Window
         RetentionBox.SelectedItem = AppSettings.RetentionChoices.First(c => c.Value == retentionDays);
         StayResidentBox.IsChecked = settings.StayResident;
         StartWithWindowsBox.IsChecked = settings.StartWithWindows;
+        UpdateResidentLock();
         PlacementBox.SelectedItem = PlacementChoices.FirstOrDefault(c => c.Value == settings.Placement) ?? PlacementChoices[0];
         ThemeBox.SelectedItem = ThemeChoices.FirstOrDefault(c => c.Value == settings.Theme) ?? ThemeChoices[0];
+        GroupByDateBox.IsChecked = settings.GroupByDate;
         ExcludePatternsBox.Text = string.Join(Environment.NewLine, settings.ExcludePatterns);
         HotkeyEnabledBox.IsChecked = settings.Hotkey.Enabled;
         CtrlBox.IsChecked = settings.Hotkey.Control;
@@ -100,6 +110,32 @@ public partial class SettingsWindow : Window
     private void OnResetAllClick(object sender, RoutedEventArgs e) => ResetAll();
 
     private void OnDeletedHistoryClick(object sender, RoutedEventArgs e) => _openDeletedHistory?.Invoke();
+
+    private void OnStartWithWindowsChanged(object sender, RoutedEventArgs e) => UpdateResidentLock();
+
+    /// <summary>
+    /// 「Windows の起動時に起動する」がオンの間は、「通知領域に常駐する」をオンにして外せないようにする
+    /// （起動時に起動して常駐しないと、サインインのたびに画面が開いてしまうため）。オフにしたら、常駐はオンのまま外せるようにする。
+    /// </summary>
+    private void UpdateResidentLock()
+    {
+        var startWithWindows = StartWithWindowsBox.IsChecked == true;
+        if (startWithWindows) StayResidentBox.IsChecked = true;
+        StayResidentBox.IsEnabled = !startWithWindows;
+        StayResidentBox.ToolTip = startWithWindows ? "Windows の起動時に起動する場合は常駐します" : null;
+        ToolTipService.SetShowOnDisabled(StayResidentBox, true);
+    }
+
+    private void OnClearRecentSearchesClick(object sender, RoutedEventArgs e) => ClearRecentSearches();
+
+    /// <summary>検索語の履歴をその場で消す（設定画面の OK・キャンセルとは関係なく、すぐ反映する）。</summary>
+    internal void ClearRecentSearches()
+    {
+        if (_clearRecentSearches == null) return;
+        _clearRecentSearches();
+        ClearRecentSearchesButton.IsEnabled = false;
+        RecentSearchCountText.Text = "（消しました）";
+    }
 
     /// <summary>ホットキーの確認結果。</summary>
     public enum HotkeyCheck
@@ -147,10 +183,12 @@ public partial class SettingsWindow : Window
             return false;
         }
         result.RetentionDays = retention.Value;
-        result.StayResident = StayResidentBox.IsChecked == true;
         result.StartWithWindows = StartWithWindowsBox.IsChecked == true;
+        // 起動時に起動するなら常駐もする（常駐しないと、サインインのたびに画面が開いてしまうため）
+        result.StayResident = StayResidentBox.IsChecked == true || result.StartWithWindows;
         result.Placement = (PlacementBox.SelectedItem as Choice<WindowPlacementMode>)?.Value ?? WindowPlacementMode.MouseScreenCenter;
         result.Theme = (ThemeBox.SelectedItem as Choice<AppTheme>)?.Value ?? AppTheme.System;
+        result.GroupByDate = GroupByDateBox.IsChecked == true;
 
         result.ExcludePatterns = ExcludePatternsBox.Text
             .Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.None)
@@ -224,7 +262,7 @@ public partial class SettingsWindow : Window
         var lines = new System.Collections.Generic.List<string>();
         if (excluded > 0) lines.Add($"・除外パターンに当たる履歴: {excluded} 件");
         if (expired > 0) lines.Add($"・保持期間を過ぎた履歴: {expired} 件");
-        return $"この設定にすると、次の履歴 {excluded + expired} 件を一覧から削除します。\n\n"
+        return $"この設定にすると、次の履歴 {excluded + expired} 件を一覧から外します（パソコンのファイルは削除しません）。\n\n"
                + string.Join("\n", lines) + "\n\n"
                + "キープした履歴は残ります。\n"
                + "設定を元に戻すと、「最近使った項目」に残っている分は一覧に戻りますが、回数は 1 からになります。\n\n"

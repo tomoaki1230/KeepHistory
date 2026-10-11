@@ -11,8 +11,10 @@ Windows の「最近使った項目」から履歴を自動で記録し、ファ
 
 ## ダウンロード
 
-[Releases](../../releases) から `KeepHistory-v（バージョン）-win-x64.zip` をダウンロードし、展開した `KeepHistory.exe` を実行してください。
-.NET のランタイムを同梱しているため、別途インストールする必要はありません。
+1. [.NET 10 デスクトップ ランタイム（x64）](https://dotnet.microsoft.com/download/dotnet/10.0) をインストールしてください（まだ入っていない場合）。
+2. [Releases](../../releases) から `KeepHistory-v（バージョン）-win-x64.zip` をダウンロードして展開し、`KeepHistory` フォルダの中の `KeepHistory.exe` を実行してください。
+
+.NET デスクトップ ランタイムが入っていない場合は、起動したときに Windows がインストールを案内します。
 
 ## ご利用の前に
 
@@ -20,16 +22,18 @@ Windows の「最近使った項目」から履歴を自動で記録し、ファ
 
 SmartScreen の警告が出た場合は、「詳細情報」→「実行」で起動できます。
 
+Windows 11 の「スマート アプリ コントロール」がオンになっている PC では、起動がブロックされる場合があります（ブロックされたときは、画面が表示されずに終了することがあります）。
+
 ## 使用技術
 
-- [.NET 8](https://dotnet.microsoft.com/)（C#）
+- [.NET 10](https://dotnet.microsoft.com/)（C#）
 - [WPF](https://github.com/dotnet/wpf)（画面）
 - [Windows Forms](https://github.com/dotnet/winforms)（通知領域のアイコン）
 - [System.Text.Json](https://learn.microsoft.com/dotnet/standard/serialization/system-text-json/overview)（履歴・設定の保存）
 
 ## ビルドと起動
 
-ビルドには [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) が必要です。
+ビルドには [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) が必要です。
 
 ```
 dotnet build

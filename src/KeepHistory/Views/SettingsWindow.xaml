@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="KeepHistory の設定"
-        Width="520" Height="560" ResizeMode="NoResize"
+        Width="520" Height="620" ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
         Background="{DynamicResource WindowBackgroundBrush}"
         Foreground="{DynamicResource TextBrush}"
@@ -33,9 +33,10 @@
                                Text="常駐すると、画面を閉じても終了せず通知領域に残ります。常駐しない場合は、画面を閉じるとアプリを終了します。" />
                     <TextBlock x:Name="ResidentCountNote" Style="{StaticResource SubTextStyle}" Margin="0,4,0,0"
                                Text="オフの場合、KeepHistory を起動していない間に開いたファイルは回数に数えられないため、「回数」が正確に取得できません。" />
-                    <CheckBox x:Name="StartWithWindowsBox" Content="Windows の起動時に KeepHistory を起動する" Margin="0,8,0,0" />
+                    <CheckBox x:Name="StartWithWindowsBox" Content="Windows の起動時に KeepHistory を起動する" Margin="0,8,0,0"
+                              Checked="OnStartWithWindowsChanged" Unchecked="OnStartWithWindowsChanged" />
                     <TextBlock Style="{StaticResource SubTextStyle}" Margin="0,4,0,0"
-                               Text="常駐する設定と組み合わせると、サインイン直後からホットキーで呼び出せます（画面は出さずに通知領域で待機します）。" />
+                               Text="サインイン直後から通知領域で待機し、ホットキーで呼び出せます。起動時に起動する場合は、常駐もします（「通知領域に常駐する」はオンのままになります）。" />
 
                     <TextBlock Text="画面" Style="{StaticResource SectionHeaderStyle}" />
                     <Grid>
@@ -54,6 +55,9 @@
                         <ComboBox x:Name="ThemeBox" AutomationProperties.Name="色" Grid.Row="1" Grid.Column="1" Width="200" Height="26" HorizontalAlignment="Left"
                                   Margin="0,6,0,0" DisplayMemberPath="Label" />
                     </Grid>
+                    <CheckBox x:Name="GroupByDateBox" Content="一覧を日付でまとめる（今日・昨日・今週など）" Margin="0,10,0,0" />
+                    <TextBlock Style="{StaticResource SubTextStyle}" Margin="0,4,0,0"
+                               Text="前回利用日時で並べているときにまとめます。ほかの列で並べ替えると、まとめずに表示します。" />
 
                     </StackPanel>
                 </ScrollViewer>
@@ -79,13 +83,22 @@
                     <TextBlock Style="{StaticResource SubTextStyle}" Margin="0,4,0,0"
                                Text="1 行に 1 つ。* と ? が使えます。\ を含むパターンはフルパスと、含まないパターンはファイル名と照合します。# で始まる行はコメントです。" />
 
-                    <TextBlock Text="削除した履歴" Style="{StaticResource SectionHeaderStyle}" />
+                    <TextBlock Text="外した履歴" Style="{StaticResource SectionHeaderStyle}" />
                     <StackPanel Orientation="Horizontal">
-                        <Button x:Name="DeletedHistoryButton" Content="削除した履歴を元に戻す..." Height="26" Padding="12,0"
+                        <Button x:Name="DeletedHistoryButton" Content="外した履歴を戻す..." Height="26" Padding="12,0"
                                 Margin="0" Style="{StaticResource ToolbarButtonStyle}" Click="OnDeletedHistoryClick" />
                     </StackPanel>
                     <TextBlock Style="{StaticResource SubTextStyle}" Margin="0,4,0,0"
-                               Text="履歴から削除したファイルを選んで、一覧に戻せます（すぐに反映されます）。" />
+                               Text="一覧から外したファイルを選んで、一覧に戻せます（すぐに反映されます）。" />
+
+                    <TextBlock Text="検索語の履歴" Style="{StaticResource SectionHeaderStyle}" />
+                    <StackPanel Orientation="Horizontal">
+                        <Button x:Name="ClearRecentSearchesButton" Content="検索語の履歴を消す" Height="26" Padding="12,0"
+                                Margin="0" Style="{StaticResource ToolbarButtonStyle}" Click="OnClearRecentSearchesClick" />
+                        <TextBlock x:Name="RecentSearchCountText" VerticalAlignment="Center" Margin="10,0,0,0" Style="{StaticResource SubTextStyle}" />
+                    </StackPanel>
+                    <TextBlock Style="{StaticResource SubTextStyle}" Margin="0,4,0,0"
+                               Text="検索してファイルを開いたときの検索語を、新しいものから 10 件まで覚えています（検索欄の右端の ▾・Alt+↓ で選べます）。消すとすぐに反映されます。" />
 
                     </StackPanel>
                 </ScrollViewer>

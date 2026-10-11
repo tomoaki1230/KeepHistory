@@ -26,11 +26,11 @@ public sealed class SettingsStorageTests : IDisposable
         _storage.SaveConfirmed(new AppSettings { StayResident = true });
         _data.SaveHistory(new() { new HistoryRecord { Path = @"C:\a.txt", LastUsed = "2026-09-26T10:00:00" } });
         _data.SaveDeleted(new());
-        Assert.True(_storage.Exists);
+        Assert.True(File.Exists(_data.SettingsPath));
 
         _storage.DeleteAndSuspend();
         Assert.False(File.Exists(_data.SettingsPath), "settings.json を削除する");
-        Assert.False(_storage.Exists, "次回起動は初回扱い");
+        Assert.False(File.Exists(_data.SettingsPath), "次回起動は初回扱い");
         Assert.True(File.Exists(_data.HistoryPath), "履歴は残す");
         Assert.True(File.Exists(_data.DeletedPath), "削除した履歴も残す");
 
@@ -47,16 +47,16 @@ public sealed class SettingsStorageTests : IDisposable
 
         _storage.SaveConfirmed(new AppSettings { RetentionDays = 90 });
         Assert.True(File.Exists(_data.SettingsPath), "設定画面で OK したら保存する");
-        Assert.Equal(90, _storage.Load().RetentionDays);
+        Assert.Equal(90, _data.LoadSettings().RetentionDays);
         Assert.False(_storage.IsSuspended, "自動保存も再開する");
         Assert.True(_storage.SaveAuto(new AppSettings { RetentionDays = 180 }));
-        Assert.Equal(180, _storage.Load().RetentionDays);
+        Assert.Equal(180, _data.LoadSettings().RetentionDays);
     }
 
     [Test]
     public void DeleteSettings_WhenNoFile_DoesNotFail()
     {
         _data.DeleteSettings();
-        Assert.False(_storage.Exists);
+        Assert.False(File.Exists(_data.SettingsPath));
     }
 }

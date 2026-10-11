@@ -198,7 +198,7 @@ public sealed class SettingsWindowTests : IDisposable
         var text = SettingsWindow.ResetConfirmMessage;
         Assert.Contains("常駐、保持期間、除外パターン、ホットキー", text);
         Assert.Contains("列の幅・並び、ウインドウサイズ", text);
-        Assert.Contains("・履歴、キープ、削除した履歴", text, "履歴も消すことを明記する");
+        Assert.Contains("・履歴、キープ、外した履歴", text, "履歴も消すことを明記する");
         Assert.Contains("元に戻せません", text);
         Assert.Contains("「最近使った項目」から読み直します", text, "空のままにはならないことを知らせる");
         Assert.False(text.Contains("そのまま残ります"), "「履歴は残る」とは書かない");
@@ -428,5 +428,87 @@ public sealed class SettingsWindowTests : IDisposable
         _window.KeyBox.SelectedItem = "H";
         Assert.False(_window.TryBuildResult(out _, out error), "文字キー単独のホットキーは不可");
         Assert.Contains("ホットキー", error);
+    }
+
+    [Test]
+    public void GroupByDate_LoadsAndBuilds()
+    {
+        using var on = new DisposableWindow(new SettingsWindow(new AppSettings(), _ => true));
+        Assert.True(on.Value.GroupByDateBox.IsChecked == true, "既定はまとめる");
+        on.Value.GroupByDateBox.IsChecked = false;
+        Assert.True(on.Value.TryBuildResult(out var result, out _));
+        Assert.False(result.GroupByDate, "外したら保存する設定もまとめない");
+        Assert.True(on.Value.GeneralTab.Content is System.Windows.DependencyObject general
+                    && System.Windows.LogicalTreeHelper.FindLogicalNode(general, "GroupByDateBox") != null, "「全般」タブにある");
+
+        using var off = new DisposableWindow(new SettingsWindow(new AppSettings { GroupByDate = false }, _ => true));
+        Assert.False(off.Value.GroupByDateBox.IsChecked == true, "保存した設定を読み込む");
+    }
+
+    [Test]
+    public void ClearRecentSearches_ClearsImmediately_IndependentOfOk()
+    {
+        var cleared = 0;
+        using var window = new DisposableWindow(new SettingsWindow(new AppSettings(), _ => true,
+            clearRecentSearches: () => cleared++, recentSearchCount: 3));
+        var w = window.Value;
+        Assert.True(w.ClearRecentSearchesButton.IsEnabled);
+        Assert.Contains("3 件", w.RecentSearchCountText.Text, "覚えている件数を出す");
+        Assert.True(w.HistoryTab.Content is System.Windows.DependencyObject history
+                    && System.Windows.LogicalTreeHelper.FindLogicalNode(history, "ClearRecentSearchesButton") != null, "「履歴」タブにある");
+
+        w.ClearRecentSearches();
+        Assert.Equal(1, cleared, "押したらすぐ消す（OK を待たない）");
+        Assert.False(w.ClearRecentSearchesButton.IsEnabled, "消した後は押せない");
+        Assert.Contains("消しました", w.RecentSearchCountText.Text);
+
+        using var none = new DisposableWindow(new SettingsWindow(new AppSettings(), _ => true,
+            clearRecentSearches: () => cleared++, recentSearchCount: 0));
+        Assert.False(none.Value.ClearRecentSearchesButton.IsEnabled, "覚えている語が無ければ押せない");
+        Assert.Contains("ありません", none.Value.RecentSearchCountText.Text);
+        Assert.Contains("検索語の履歴", SettingsWindow.ResetConfirmMessage, "「すべて初期状態に戻す」の確認文にも載せる");
+    }
+
+    [Test]
+    public void StartWithWindows_AlsoKeepsTheAppResident()
+    {
+        using var window = new DisposableWindow(new SettingsWindow(new AppSettings { StayResident = false, StartWithWindows = false }, _ => true));
+        var w = window.Value;
+        Assert.True(w.StayResidentBox.IsEnabled, "前提: 起動時に起動しないなら、常駐は選べる");
+
+        w.StartWithWindowsBox.IsChecked = true;
+        Assert.True(w.StayResidentBox.IsChecked == true, "起動時に起動するなら、常駐もオンにする");
+        Assert.False(w.StayResidentBox.IsEnabled, "起動時に起動する間は、常駐を外せない（サインインのたびに画面が開かないように）");
+        Assert.Equal("Windows の起動時に起動する場合は常駐します", w.StayResidentBox.ToolTip as string, "外せない理由を伝える");
+        Assert.True(w.TryBuildResult(out var result, out _));
+        Assert.True(result.StartWithWindows && result.StayResident);
+        w.StayResidentBox.IsChecked = false; // 画面では外せないが、外れていても
+        Assert.True(w.TryBuildResult(out result, out _));
+        Assert.True(result.StayResident, "起動時に起動するなら、保存する設定も常駐にする");
+        w.StayResidentBox.IsChecked = true; // 画面どおりの状態に戻す
+
+        w.StartWithWindowsBox.IsChecked = false;
+        Assert.True(w.StayResidentBox.IsEnabled, "起動時に起動しないなら、また選べる");
+        Assert.True(w.StayResidentBox.IsChecked == true, "常駐はオンのまま（勝手に外さない）");
+        w.StayResidentBox.IsChecked = false;
+        Assert.True(w.TryBuildResult(out result, out _));
+        Assert.False(result.StartWithWindows || result.StayResident, "どちらもオフにできる");
+
+        // 以前の設定で「起動時に起動する・常駐しない」だった場合も、開いたら常駐をオンにする
+        using var old = new DisposableWindow(new SettingsWindow(new AppSettings { StayResident = false, StartWithWindows = true }, _ => true));
+        Assert.True(old.Value.StayResidentBox.IsChecked == true && !old.Value.StayResidentBox.IsEnabled);
+    }
+
+    [Test]
+    public void OldSettings_StartWithWindowsWithoutResident_AreFixedAtStartup()
+    {
+        var old = new AppSettings { StayResident = false };
+        Assert.True(old.EnsureResidentWhenStartingWithWindows(startupRegistered: true), "以前の版の「起動時に起動・常駐しない」は直す（保存が必要）");
+        Assert.True(old.StayResident);
+        Assert.False(old.EnsureResidentWhenStartingWithWindows(startupRegistered: true), "直した後は何もしない");
+
+        var notRegistered = new AppSettings { StayResident = false };
+        Assert.False(notRegistered.EnsureResidentWhenStartingWithWindows(startupRegistered: false), "起動時に起動しないなら、常駐しない設定のまま");
+        Assert.False(notRegistered.StayResident);
     }
 }
