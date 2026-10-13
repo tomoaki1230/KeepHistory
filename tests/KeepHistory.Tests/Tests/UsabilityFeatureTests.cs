@@ -234,6 +234,51 @@ public sealed class UsabilityFeatureTests
         Assert.Equal(3, vm.View.Count, "外すとまた出す");
     }
 
+    // ---- キープした行は「表示しない」の対象にしない（1.2.1） ----
+
+    [Test]
+    public void KeptEntries_AreShown_EvenWhenMissingOrOnNetwork()
+    {
+        var store = new HistoryStore();
+        store.Register(@"C:\Local\gone.xlsx", Now.AddHours(-1), Now);
+        store.Register(@"C:\Local\kept-gone.xlsx", Now.AddHours(-2), Now);
+        store.Register(@"\\server\share\b.docx", Now.AddHours(-3), Now);
+        store.Register(@"\\server\share\kept.docx", Now.AddHours(-4), Now);
+        store.Register(@"Z:\mapped\kept.pptx", Now.AddHours(-5), Now);
+        store.Find(@"C:\Local\gone.xlsx")!.IsMissing = true;
+        var keptGone = store.Find(@"C:\Local\kept-gone.xlsx")!;
+        keptGone.IsMissing = true;
+        keptGone.IsKept = true;
+        store.Find(@"\\server\share\kept.docx")!.IsKept = true;
+        store.Find(@"Z:\mapped\kept.pptx")!.IsKept = true;
+        var vm = new MainViewModel(store, () => Now);
+        vm.NetworkPathCheckerFactory = () => new FileExistenceChecker(_ => true,
+            root => root.StartsWith("Z", StringComparison.OrdinalIgnoreCase) ? System.IO.DriveType.Network : System.IO.DriveType.Fixed).IsNetworkPath;
+        IEnumerable<string> Shown() => vm.View.Cast<HistoryEntry>().Select(e => e.Path).OrderBy(p => p);
+
+        vm.HideMissingFiles = true;
+        Assert.SequenceEqual(new[] { @"\\server\share\b.docx", @"\\server\share\kept.docx", @"C:\Local\kept-gone.xlsx", @"Z:\mapped\kept.pptx" }.OrderBy(p => p), Shown(),
+            "見つからないファイルでも、キープしていれば出す");
+
+        vm.HideMissingFiles = false;
+        vm.HideNetworkFiles = true;
+        Assert.SequenceEqual(new[] { @"\\server\share\kept.docx", @"C:\Local\gone.xlsx", @"C:\Local\kept-gone.xlsx", @"Z:\mapped\kept.pptx" }.OrderBy(p => p), Shown(),
+            "ネットワーク上のファイルでも、キープしていれば出す（UNC も割り当てたドライブも）");
+
+        vm.HideMissingFiles = true;
+        Assert.SequenceEqual(new[] { @"\\server\share\kept.docx", @"C:\Local\kept-gone.xlsx", @"Z:\mapped\kept.pptx" }.OrderBy(p => p), Shown(),
+            "両方オンでも、キープした行はすべて出す");
+
+        vm.KeptOnly = true;
+        Assert.Equal(3, vm.View.Count, "「キープのみ」でも、隠れずに全部出る");
+
+        // キープを外したら、また「表示しない」の対象になる
+        vm.KeptOnly = false;
+        keptGone.IsKept = false;
+        vm.NotifyStoreChanged();
+        Assert.False(Shown().Contains(@"C:\Local\kept-gone.xlsx"));
+    }
+
     // ---- 履歴が多いときの検索 ----
 
     [Test]

@@ -216,7 +216,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
     /// <summary>今、日付でまとめて表示しているか。</summary>
     public bool IsGroupedByDate => View.GroupDescriptions.Count > 0;
 
-    public string StatusText => $"表示 {View.Count} 件 / 全 {_store.Entries.Count} 件";
+    /// <summary>絞り込みにかかわらず、すべての履歴（キープの一覧を CSV に出力するときに使う）。</summary>
+    public IReadOnlyCollection<HistoryEntry> AllEntries => _store.Entries;
+
+    public string StatusText =>$"表示 {View.Count} 件 / 全 {_store.Entries.Count} 件";
 
     public const string NoHistoryMessage = "履歴はまだありません。\nファイルを開くと、ここに表示されます。";
     public const string NoMatchMessage = "条件に一致する履歴はありません。\n検索語や絞り込み（種類・期間・キープのみ・フォルダ）を変えてみてください。";

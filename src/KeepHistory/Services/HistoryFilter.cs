@@ -79,19 +79,23 @@ public sealed class FilterCriteria
     /// <summary>このフォルダの直下のファイルだけ（右クリックの「このフォルダのファイルを表示」）。null は絞り込まない。</summary>
     public string? Folder { get; init; }
 
-    /// <summary>見つからないファイル（淡色の行）を出さない（表示メニューの「削除済みのローカルファイルを表示しない」）。</summary>
+    /// <summary>見つからないファイル（淡色の行）を出さない（表示メニューの「削除済みのローカルファイルを表示しない」）。キープした行は出す。</summary>
     public bool HideMissing { get; init; }
 
     /// <summary>
-    /// ネットワーク上のパスか（表示メニューの「ネットワーク上のファイルを表示しない」）。null なら絞り込まない。
+    /// ネットワーク上のパスか（表示メニューの「ネットワーク上のファイルを表示しない」）。null なら絞り込まない。キープした行は出す。
     /// ドライブ種別の問い合わせは応答を待たない（FileExistenceChecker.IsNetworkPath）。
     /// </summary>
     public Func<string, bool>? IsNetworkPath { get; init; }
 
     public bool Matches(HistoryEntry entry, DateTime now)
     {
-        if (HideMissing && entry.IsMissing) return false;
-        if (IsNetworkPath != null && IsNetworkPath(entry.Path)) return false;
+        // キープした行は「表示しない」の対象にしない（残しておきたいという意思表示なので、見つからなくても・ネットワーク上でも出す）
+        if (!entry.IsKept)
+        {
+            if (HideMissing && entry.IsMissing) return false;
+            if (IsNetworkPath != null && IsNetworkPath(entry.Path)) return false;
+        }
         if (KeptOnly && !entry.IsKept) return false;
         if (Folder != null && !SameFolder(entry.FolderPath, Folder)) return false;
         if (Extension != null && !string.Equals(entry.Extension, Extension, StringComparison.OrdinalIgnoreCase)) return false;

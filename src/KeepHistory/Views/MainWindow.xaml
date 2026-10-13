@@ -22,12 +22,15 @@
                       ToolTip="前回利用日時で並べているとき、「今日」「昨日」「今週」などの見出しで区切ります" />
             <MenuItem x:Name="HideMissingFilesMenuItem" Header="削除済みのローカルファイルを表示しない(_M)" IsCheckable="True"
                       IsChecked="{Binding HideMissingFiles}"
-                      ToolTip="削除・移動などで見つからないファイル（薄い色の行）を一覧に出しません。ネットワーク上のファイルは対象外です（履歴からは消しません）" />
+                      ToolTip="削除・移動などで見つからないファイル（薄い色の行）を一覧に出しません。ネットワーク上のファイルと、キープしたファイルは表示します（履歴からは消しません）" />
             <MenuItem x:Name="HideNetworkFilesMenuItem" Header="ネットワーク上のファイルを表示しない(_N)" IsCheckable="True"
                       IsChecked="{Binding HideNetworkFiles}"
-                      ToolTip="共有フォルダ（\\サーバー\…）や、割り当てたネットワークドライブのファイルを一覧に出しません（履歴からは消しません）" />
+                      ToolTip="共有フォルダ（\\サーバー\…）や、割り当てたネットワークドライブのファイルを一覧に出しません。キープしたファイルは表示します（履歴からは消しません）" />
         </MenuItem>
         <MenuItem x:Name="ToolsMenu" Header="ツール(_T)">
+            <MenuItem x:Name="ExportKeptCsvMenuItem" Header="キープの一覧を CSV に出力(_E)..." Click="OnExportKeptCsvClick"
+                      ToolTip="キープしたファイルをすべて（絞り込みにかかわらず）、Excel で開ける CSV ファイルに保存します" />
+            <Separator />
             <MenuItem x:Name="SettingsMenuItem" Header="設定(_O)..." Click="OnSettingsClick" />
         </MenuItem>
         <MenuItem x:Name="HelpMenu" Header="ヘルプ(_H)">

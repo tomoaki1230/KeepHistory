@@ -298,7 +298,7 @@ public sealed class MainWindowTests : IDisposable
         Assert.SequenceEqual(new[] { "表示(_V)", "ツール(_T)", "ヘルプ(_H)" }, top, "メニューバーは表示・ツール・ヘルプ（Windows のアプリと同じ順）");
         Assert.SequenceEqual(new[] { "一覧を日付でまとめる(_G)", "削除済みのローカルファイルを表示しない(_M)", "ネットワーク上のファイルを表示しない(_N)" },
             _window.ViewMenu.Items.OfType<MenuItem>().Select(m => m.Header as string));
-        Assert.SequenceEqual(new[] { "設定(_O)..." }, _window.ToolsMenu.Items.OfType<MenuItem>().Select(m => m.Header as string));
+        Assert.SequenceEqual(new[] { "キープの一覧を CSV に出力(_E)...", "設定(_O)..." }, _window.ToolsMenu.Items.OfType<MenuItem>().Select(m => m.Header as string));
         Assert.SequenceEqual(new[] { "サードパーティーのライセンス(_L)", "バージョン情報(_A)" },
             _window.HelpMenu.Items.OfType<MenuItem>().Select(m => m.Header as string));
         Assert.True(_window.MainMenu.TranslatePoint(new Point(0, 0), _window.SearchBox).Y < 0, "メニューバーは検索行より上");
@@ -390,7 +390,7 @@ public sealed class MainWindowTests : IDisposable
             Assert.Same(_window, about.Owner, "履歴画面の上に出す");
             var version = typeof(MainWindow).Assembly.GetName().Version!;
             Assert.Equal("バージョン " + version.ToString(3), about.VersionText.Text, "アプリのバージョン（csproj の Version）");
-            Assert.Equal("1.2.0", AboutWindow.AppVersion);
+            Assert.Equal("1.2.1", AboutWindow.AppVersion);
             Assert.Equal("KeepHistory", about.ProductText.Text);
             Assert.Equal("作成者: Tomoaki Bessho", about.AuthorText.Text, "作成者を表示");
             Assert.Equal("Tomoaki Bessho", AboutWindow.Author, "csproj の作成者から読む");

@@ -34,6 +34,7 @@ public partial class MainWindow : Window
     {
         _vm = vm;
         ShowMessage = message => MessageBox.Show(this, message, "KeepHistory", MessageBoxButton.OK, MessageBoxImage.Warning);
+        ChooseCsvPath = ShowSaveCsvDialog;
         InitializeComponent();
         foreach (var column in HistoryGrid.Columns)
         {
@@ -933,6 +934,53 @@ public partial class MainWindow : Window
     }
 
     private void OnSettingsClick(object sender, RoutedEventArgs e) => SettingsRequested?.Invoke(this, EventArgs.Empty);
+
+    /// <summary>保存先を選ぶ画面（既定のファイル名を渡す。やめたら null。テストで差し替える）。</summary>
+    internal Func<string, string?> ChooseCsvPath { get; set; }
+
+    /// <summary>今の日時（CSV の既定のファイル名に使う。テストで差し替える）。</summary>
+    internal Func<DateTime> Now { get; set; } = () => DateTime.Now;
+
+    private void OnExportKeptCsvClick(object sender, RoutedEventArgs e) => ExportKeptCsv();
+
+    /// <summary>キープしたファイルの一覧を CSV に保存する（ツール ＞ キープの一覧を CSV に出力。1.2.1）。</summary>
+    internal void ExportKeptCsv()
+    {
+        ClearStatusMessage();
+        var kept = KeptCsvExporter.KeptEntries(_vm.AllEntries);
+        if (kept.Count == 0)
+        {
+            ShowProgressMessage("キープしたファイルはありません（一覧の ☆ を押すとキープできます）");
+            return;
+        }
+        var path = ChooseCsvPath(KeptCsvExporter.DefaultFileName(Now()));
+        if (string.IsNullOrEmpty(path)) return;
+        try
+        {
+            KeptCsvExporter.Write(path, kept);
+            ShowProgressMessage($"キープ {kept.Count} 件を CSV に保存しました: {path}");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            ErrorLog.Write("キープの一覧を CSV に保存できませんでした。", ex);
+            ShowMessage($"CSV ファイルを保存できませんでした。\n\n{path}\n\n{ex.Message}");
+        }
+    }
+
+    private string? ShowSaveCsvDialog(string defaultFileName)
+    {
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "キープの一覧を CSV に出力",
+            FileName = defaultFileName,
+            DefaultExt = ".csv",
+            Filter = "CSV ファイル (*.csv)|*.csv|すべてのファイル (*.*)|*.*",
+            AddExtension = true,
+            OverwritePrompt = true,
+            InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+        };
+        return dialog.ShowDialog(this) == true ? dialog.FileName : null;
+    }
 
     private void OnRefreshClick(object sender, RoutedEventArgs e) => RequestRefresh();
 
